@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install pyyaml
+      - run: make test
+
+  scenarios:
+    # Proves every scenario really produces its alert on a fresh cluster.
+    # The agent evaluation gate (milestone 4) will plug in here.
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install pyyaml
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: incidentpilot
+          config: infra/kind/cluster.yaml
+      - name: Build and load image
+        run: |
+          docker build -t incidentpilot/shop:dev apps/shop
+          kind load docker-image incidentpilot/shop:dev --name incidentpilot
+      - name: Deploy
+        run: |
+          kubectl apply -f deploy/monitoring/
+          kubectl apply -f deploy/shop/
+          make wait
+      - name: Warm up (let Prometheus collect a healthy baseline)
+        run: sleep 90 && python scenarios/runner.py alerts
+      - name: Run scenarios
+        run: |
+          for s in $(python scenarios/runner.py list | cut -d' ' -f1); do
+            python scenarios/runner.py run "$s"
+          done
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n shop describe pods | tail -n 200
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: incidents
+          path: runs/

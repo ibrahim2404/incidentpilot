@@ -1,0 +1,22 @@
+id: S001
+title: Orders response cache grows without eviction until OOMKilled
+# Ground truth is never shown to the agent. The agent only receives the alert payload.
+ground_truth:
+  component: orders
+  fault: memory_leak
+  summary: >
+    RESPONSE_CACHE_ENABLED=true in orders-config enables a per-request cache with no
+    eviction. Memory climbs to the 96Mi limit, the container is OOMKilled and restarts.
+  evidence:
+    - orders container_memory_working_set_bytes rises steadily to the limit
+    - kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} for orders
+    - response_cache_entries for orders grows with request count
+inject:
+  - [-n, shop, patch, configmap, orders-config, --type, merge, -p, '{"data":{"RESPONSE_CACHE_ENABLED":"true"}}']
+  - [-n, shop, rollout, restart, deployment/orders]
+expect_alerts: [ContainerRestarting]
+timeout_s: 480
+revert:
+  - [-n, shop, patch, configmap, orders-config, --type, merge, -p, '{"data":{"RESPONSE_CACHE_ENABLED":"false"}}']
+  - [-n, shop, rollout, restart, deployment/orders]
+  - [-n, shop, rollout, status, deployment/orders, --timeout=120s]

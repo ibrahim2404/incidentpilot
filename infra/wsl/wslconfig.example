@@ -1,0 +1,7 @@
+# Windows only. Copy to %UserProfile%\.wslconfig, then run `wsl --shutdown`.
+# Caps the WSL2 VM so Windows keeps ~3 GB of the 8 GB.
+# Install Docker Engine inside the WSL2 Ubuntu distro (apt, docker-ce) instead of Docker Desktop.
+[wsl2]
+memory=5GB
+processors=4
+swap=2GB

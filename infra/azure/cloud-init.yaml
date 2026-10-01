@@ -1,0 +1,18 @@
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - git
+  - make
+  - jq
+  - python3-yaml
+
+runcmd:
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" INSTALL_K3S_EXEC="--disable=traefik --disable=servicelb" sh -
+  - usermod -aG docker azureuser
+  - mkdir -p /home/azureuser/.kube
+  - cp /etc/rancher/k3s/k3s.yaml /home/azureuser/.kube/config
+  - chown -R azureuser:azureuser /home/azureuser/.kube
+  - chmod 600 /home/azureuser/.kube/config
+  - echo 'export KUBECONFIG=$HOME/.kube/config' >> /home/azureuser/.bashrc
+  - touch /home/azureuser/.cloud-init-done

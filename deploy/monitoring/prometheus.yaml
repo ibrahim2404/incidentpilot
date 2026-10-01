@@ -1,0 +1,134 @@
+# Plain Prometheus (no operator) sized for an 8 GB laptop.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: prometheus, namespace: monitoring}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: prometheus}
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/proxy, nodes/metrics, services, endpoints, pods]
+    verbs: [get, list, watch]
+  - nonResourceURLs: [/metrics]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: prometheus}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: prometheus}
+subjects: [{kind: ServiceAccount, name: prometheus, namespace: monitoring}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: prometheus-config, namespace: monitoring}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    rule_files: [/etc/prometheus/rules.yml]
+    scrape_configs:
+      # App pods that opt in via annotations.
+      - job_name: pods
+        kubernetes_sd_configs: [{role: pod}]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+      # Container CPU/memory from the kubelet (cAdvisor), via the API server proxy.
+      - job_name: cadvisor
+        scheme: https
+        tls_config: {ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+        authorization: {credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token}
+        kubernetes_sd_configs: [{role: node}]
+        relabel_configs:
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+        metric_relabel_configs:
+          - source_labels: [namespace]
+            regex: shop|monitoring
+            action: keep
+      # Restarts, OOMKilled reasons, replica counts.
+      - job_name: kube-state-metrics
+        static_configs: [{targets: ["kube-state-metrics.monitoring.svc:8080"]}]
+  rules.yml: |
+    groups:
+      - name: shop
+        rules:
+          # Symptom alerts only. The agent must find the cause itself.
+          - alert: HighErrorRate
+            expr: |
+              sum by (namespace, service) (rate(http_requests_total{code=~"5.."}[1m]))
+                / sum by (namespace, service) (rate(http_requests_total[1m])) > 0.2
+            for: 1m
+            labels: {severity: page}
+            annotations:
+              summary: "{{ $labels.service }} 5xx ratio is {{ $value | humanizePercentage }}"
+          - alert: ContainerRestarting
+            expr: increase(kube_pod_container_status_restarts_total{namespace="shop"}[5m]) >= 2
+            labels: {severity: page}
+            annotations:
+              summary: "{{ $labels.pod }}/{{ $labels.container }} restarted {{ $value | humanize }} times in 5m"
+          - alert: NoTraffic
+            expr: sum(rate(http_requests_total{service="gateway"}[2m])) == 0
+            for: 2m
+            labels: {severity: warn}
+            annotations:
+              summary: gateway is receiving no traffic
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: prometheus, namespace: monitoring, labels: {app: prometheus}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: prometheus}}
+  template:
+    metadata:
+      labels: {app: prometheus}
+    spec:
+      serviceAccountName: prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=6h
+            - --web.enable-lifecycle
+          ports: [{containerPort: 9090, name: http}]
+          readinessProbe: {httpGet: {path: /-/ready, port: http}, periodSeconds: 5}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus}
+            - {name: data, mountPath: /prometheus}
+      volumes:
+        - {name: config, configMap: {name: prometheus-config}}
+        - {name: data, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: prometheus, namespace: monitoring}
+spec:
+  selector: {app: prometheus}
+  ports: [{name: http, port: 9090, targetPort: http}]

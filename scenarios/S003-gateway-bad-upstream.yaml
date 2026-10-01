@@ -1,0 +1,22 @@
+id: S003
+title: Gateway config points at a non-existent orders host
+ground_truth:
+  component: gateway
+  fault: bad_config
+  summary: >
+    gateway-config UPSTREAM_URL was changed to orders.shop-prod.svc.cluster.local
+    (wrong namespace). DNS resolution fails, gateway returns 503 on every request,
+    and orders receives no traffic. orders and inventory are healthy.
+  evidence:
+    - gateway logs "upstream call failed" with a name-resolution error
+    - gateway upstream_requests_total{outcome="dns_error"} increasing
+    - orders request rate drops to zero while its pods are Ready
+inject:
+  - [-n, shop, patch, configmap, gateway-config, --type, merge, -p, '{"data":{"UPSTREAM_URL":"http://orders.shop-prod.svc.cluster.local:8080"}}']
+  - [-n, shop, rollout, restart, deployment/gateway]
+expect_alerts: [HighErrorRate]
+timeout_s: 300
+revert:
+  - [-n, shop, patch, configmap, gateway-config, --type, merge, -p, '{"data":{"UPSTREAM_URL":"http://orders.shop.svc.cluster.local:8080"}}']
+  - [-n, shop, rollout, restart, deployment/gateway]
+  - [-n, shop, rollout, status, deployment/gateway, --timeout=120s]

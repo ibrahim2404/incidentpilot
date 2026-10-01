@@ -1,0 +1,20 @@
+id: S002
+title: Inventory has zero replicas; orders and gateway return 5xx
+ground_truth:
+  component: inventory
+  fault: dependency_down
+  summary: >
+    The inventory deployment was scaled to 0. The inventory Service has no endpoints,
+    so orders gets connection refused and returns 503; gateway propagates 502.
+    orders and gateway are healthy and are not the cause.
+  evidence:
+    - inventory deployment spec.replicas = 0 and the Service has no endpoints
+    - orders upstream_requests_total{outcome="connection_refused"} increasing
+    - orders logs "upstream call failed" with upstream=inventory
+inject:
+  - [-n, shop, scale, deployment/inventory, --replicas=0]
+expect_alerts: [HighErrorRate]
+timeout_s: 300
+revert:
+  - [-n, shop, scale, deployment/inventory, --replicas=1]
+  - [-n, shop, rollout, status, deployment/inventory, --timeout=120s]

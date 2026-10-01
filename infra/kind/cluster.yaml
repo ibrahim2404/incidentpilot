@@ -1,0 +1,5 @@
+# Used by GitHub Actions (kind is preinstalled-friendly there; k3d stays local).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
