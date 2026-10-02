@@ -12,7 +12,7 @@ async def main() -> None:
         tools = await client.list_tools()
         for tool in tools.tools:
             print(tool.name, "-", tool.description)
-            print("  input schema:", json.dumps(tool.inputSchema))
+            print("  input schema:", json.dumps(tool.inputschema))
         result = await client.call_tool("ping", {"name": "Ibrahim"})
         print("result:", result.content[0].text)
 
