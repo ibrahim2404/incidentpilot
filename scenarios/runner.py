@@ -87,8 +87,9 @@ def wait_for(predicate, timeout_s, what, interval=10):
 
 def cmd_run(s, keep=False):
     names = lambda: {a["labels"]["alertname"] for a in firing_alerts()}
-    if names():
-        raise SystemExit(f"cluster not healthy before injection, firing: {sorted(names())}")
+    # Never mix two incidents: wait (up to 6 min) for alerts left by a previous run to clear.
+    if names() and not wait_for(lambda: not names() or None, 360, "previous alerts to clear", interval=15):
+        raise SystemExit(f"cluster not healthy before injection, still firing: {sorted(names())}")
     started = dt.datetime.now(dt.timezone.utc)
     for step in s["inject"]:
         kubectl(step)

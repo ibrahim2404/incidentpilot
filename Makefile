@@ -26,9 +26,13 @@ build-k3s:
 	docker build -t $(IMAGE) apps/shop
 	docker save $(IMAGE) | sudo k3s ctr images import -
 
+# Restarts are needed: Prometheus only reads its config and rules at start,
+# and pods keep the old image when a new one is loaded under the same tag.
 deploy:
 	kubectl apply -f deploy/monitoring/
 	kubectl apply -f deploy/shop/
+	kubectl -n monitoring rollout restart deploy/prometheus
+	kubectl -n shop rollout restart deploy/gateway deploy/orders deploy/inventory
 	$(MAKE) wait
 
 wait:
