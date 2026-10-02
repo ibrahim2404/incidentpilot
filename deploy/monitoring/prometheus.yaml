@@ -83,6 +83,14 @@ data:
             labels: {severity: page}
             annotations:
               summary: "{{ $labels.service }} 5xx ratio is {{ $value | humanizePercentage }}"
+          - alert: HighLatency
+            expr: |
+              histogram_quantile(0.95,
+                sum by (namespace, service, le) (rate(http_request_duration_seconds_bucket[2m]))) > 0.5
+            for: 1m
+            labels: {severity: page}
+            annotations:
+              summary: "{{ $labels.service }} p95 latency is {{ $value | humanizeDuration }}"
           - alert: ContainerRestarting
             expr: increase(kube_pod_container_status_restarts_total{namespace="shop"}[5m]) >= 2
             labels: {severity: page}

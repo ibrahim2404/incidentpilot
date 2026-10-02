@@ -73,6 +73,14 @@ class ChainTest(unittest.TestCase):
         _, m = get(url + "/metrics")
         self.assertIn('outcome="dns_error"', m)
 
+    def test_validation_rounds_cost_cpu(self):
+        _, h, url = start({"SERVICE_NAME": "inventory", "REQUEST_VALIDATION_ROUNDS": "20000"})
+        self.servers.append(h)
+        code, _ = get(url + "/api/stock")
+        self.assertEqual(code, 200)
+        _, m = get(url + "/metrics")
+        self.assertIn('http_request_duration_seconds_count{service="inventory",route="/api/stock"} 1', m)
+
     def test_unknown_service_rejected(self):
         with self.assertRaises(ValueError):
             Config({"SERVICE_NAME": "payments"})

@@ -48,6 +48,9 @@ def validate(s):
         errs.append(f"ground_truth.component must be one of {sorted(COMPONENTS)}")
     if gt.get("fault") not in FAULTS:
         errs.append(f"ground_truth.fault must be one of {sorted(FAULTS)}")
+    for extra in gt.get("also_accept", []):
+        if extra not in FAULTS:
+            errs.append(f"ground_truth.also_accept: {extra!r} is not a known fault")
     for step in s.get("inject", []) + s.get("revert", []):
         if not isinstance(step, list) or not all(isinstance(a, str) for a in step):
             errs.append(f"step must be a list of strings: {step!r}")

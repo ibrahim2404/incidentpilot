@@ -1,0 +1,23 @@
+id: S005
+title: Gateway request validation saturates its CPU limit and latency climbs
+ground_truth:
+  component: gateway
+  fault: cpu_saturation
+  summary: >
+    gateway-config REQUEST_VALIDATION_ROUNDS was raised from 1000 to 400000. Each
+    request now burns about 0.25 s of CPU; against a 200m limit the container is
+    throttled and gateway p95 latency rises above one second. orders and inventory
+    stay fast.
+  evidence:
+    - gateway container CPU usage pinned at its 200m limit
+    - container_cpu_cfs_throttled_periods_total rising for gateway
+    - gateway p95 latency high while orders and inventory p95 stay low
+inject:
+  - [-n, shop, patch, configmap, gateway-config, --type, merge, -p, '{"data":{"REQUEST_VALIDATION_ROUNDS":"400000"}}']
+  - [-n, shop, rollout, restart, deployment/gateway]
+expect_alerts: [HighLatency]
+timeout_s: 360
+revert:
+  - [-n, shop, patch, configmap, gateway-config, --type, merge, -p, '{"data":{"REQUEST_VALIDATION_ROUNDS":"1000"}}']
+  - [-n, shop, rollout, restart, deployment/gateway]
+  - [-n, shop, rollout, status, deployment/gateway, --timeout=120s]

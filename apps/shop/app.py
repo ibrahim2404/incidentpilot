@@ -13,8 +13,12 @@ from a deployment spec:
   RESPONSE_CACHE_ENABLED=true  -> orders caches responses per request id and
                                   never evicts (unbounded growth -> OOMKilled)
   UPSTREAM_URL                 -> wrong host/port breaks the call chain
+  REQUEST_VALIDATION_ROUNDS    -> hashing work per request; a large value
+                                  saturates the CPU limit and latency climbs
+  SERVICE_NAME typo            -> process exits at start (crash loop)
 """
 
+import hashlib
 import json
 import os
 import socket
@@ -42,6 +46,7 @@ class Config:
         self.upstream_timeout = float(e.get("UPSTREAM_TIMEOUT_SECONDS", "2"))
         self.cache_enabled = e.get("RESPONSE_CACHE_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
         self.cache_entry_kb = int(e.get("RESPONSE_CACHE_ENTRY_KB", "256"))
+        self.validation_rounds = int(e.get("REQUEST_VALIDATION_ROUNDS", "0"))
 
 
 class Metrics:
@@ -153,8 +158,16 @@ class App:
                 upstream=up, url=url, error=text, request_id=request_id)
             return code, {"error": f"{up} unavailable"}
 
+    def validate_request(self, request_id):
+        """CPU-bound check on every request; cost grows linearly with the rounds."""
+        digest = request_id.encode()
+        for _ in range(self.cfg.validation_rounds):
+            digest = hashlib.sha256(digest).digest()
+        return digest
+
     def handle_business(self, request_id):
         svc = self.cfg.service
+        self.validate_request(request_id)
         if svc == "inventory":
             return 200, {"sku": "SKU-1042", "available": 17}
         status, body = self.call_upstream(request_id)

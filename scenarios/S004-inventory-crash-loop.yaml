@@ -1,0 +1,23 @@
+id: S004
+title: Inventory rollout crash-loops on a typo in its service name
+ground_truth:
+  component: inventory
+  fault: crash_loop
+  also_accept: [bad_config]
+  summary: >
+    inventory-config SERVICE_NAME was changed to "inventroy". The new inventory pod
+    exits at start with "invalid configuration" and enters CrashLoopBackOff. The old
+    pod keeps serving because the rollout is stuck, so users see no errors yet.
+  evidence:
+    - new inventory pod in CrashLoopBackOff with a rising restart count
+    - previous container logs show "invalid configuration" / unknown SERVICE_NAME
+    - inventory deployment rollout stuck; old ReplicaSet still serving traffic
+inject:
+  - [-n, shop, patch, configmap, inventory-config, --type, merge, -p, '{"data":{"SERVICE_NAME":"inventroy"}}']
+  - [-n, shop, rollout, restart, deployment/inventory]
+expect_alerts: [ContainerRestarting]
+timeout_s: 300
+revert:
+  - [-n, shop, patch, configmap, inventory-config, --type, merge, -p, '{"data":{"SERVICE_NAME":"inventory"}}']
+  - [-n, shop, rollout, restart, deployment/inventory]
+  - [-n, shop, rollout, status, deployment/inventory, --timeout=120s]

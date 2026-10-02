@@ -34,3 +34,5 @@ make down
 | S001 | ContainerRestarting | orders / memory_leak |
 | S002 | HighErrorRate | inventory / dependency_down |
 | S003 | HighErrorRate | gateway / bad_config |
+| S004 | ContainerRestarting | inventory / crash_loop |
+| S005 | HighLatency | gateway / cpu_saturation |

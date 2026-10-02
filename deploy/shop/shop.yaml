@@ -12,6 +12,7 @@ data:
   SERVICE_NAME: gateway
   UPSTREAM_URL: http://orders.shop.svc.cluster.local:8080
   UPSTREAM_TIMEOUT_SECONDS: "2"
+  REQUEST_VALIDATION_ROUNDS: "1000"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -22,12 +23,14 @@ data:
   UPSTREAM_TIMEOUT_SECONDS: "2"
   RESPONSE_CACHE_ENABLED: "false"
   RESPONSE_CACHE_ENTRY_KB: "256"
+  REQUEST_VALIDATION_ROUNDS: "1000"
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: inventory-config, namespace: shop}
 data:
   SERVICE_NAME: inventory
+  REQUEST_VALIDATION_ROUNDS: "1000"
 ---
 apiVersion: apps/v1
 kind: Deployment
