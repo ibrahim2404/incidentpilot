@@ -25,6 +25,6 @@ except PrometheusError as e:
 
 print("4. alerts firing now:")
 try:
-    print("  ", prom.alerts())
+    prom.alerts()
 except NotImplementedError:
-    print("   not implemented yet (your exercise)")
+    print("  ", prom.alerts())
