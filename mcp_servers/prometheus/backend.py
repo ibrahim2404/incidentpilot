@@ -57,6 +57,5 @@ class LiveBackend:
         return data["result"]
 
     def alerts(self) -> list[dict]:
-        raise NotImplementedError
         r=self.instant('ALERTS{alertstate="firing"}')
         return r
