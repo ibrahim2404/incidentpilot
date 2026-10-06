@@ -25,6 +25,8 @@ except PrometheusError as e:
 
 print("4. alerts firing now:")
 try:
-    prom.alerts()
-except NotImplementedError:
-    print("  ", prom.alerts())
+    for a in prom.alerts():
+        print("  ", a["metric"]["alertname"], a["metric"].get("service", ""))
+    print("   (end of list)")
+except PrometheusError as e:
+    print("   PrometheusError:", e)
