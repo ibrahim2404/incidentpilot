@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import logging
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -21,7 +22,7 @@ from backend import Backend, LiveBackend, PrometheusError  # noqa: E402
 MAX_MINUTES = 180
 MAX_POINTS_PER_QUERY = 240
 SERVICE_NAME = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
-
+logging.getLogger("httpx").setLevel(logging.WARNING)
 mcp = MCPServer("prometheus")
 _at = os.environ.get("PROM_AT")
 backend: Backend = LiveBackend(os.environ.get("PROM_URL", "http://localhost:9090"), at=float(_at) if _at else None)

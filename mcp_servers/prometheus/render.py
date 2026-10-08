@@ -8,12 +8,12 @@ from __future__ import annotations
 
 MAX_SERIES = 15
 MAX_POINTS = 12
-
+NOISY_LABELS = {"id", "name", "image", "uid"}
 
 def labels(metric: dict) -> str:
     """{'__name__': 'up', 'job': 'pods', 'pod': 'orders-1'} -> 'up{job="pods", pod="orders-1"}'"""
     name = metric.get("__name__", "")
-    rest = ", ".join(f'{k}="{v}"' for k, v in sorted(metric.items()) if k != "__name__")
+    rest = ", ".join(f'{k}="{v}"' for k, v in sorted(metric.items()) if k != "__name__" and k not in NOISY_LABELS)
     return f"{name}{{{rest}}}" if rest else (name or "{}")
 
 
