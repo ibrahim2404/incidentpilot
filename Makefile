@@ -2,7 +2,7 @@ CLUSTER ?= incidentpilot
 IMAGE   ?= incidentpilot/shop:dev
 PY      ?= python3
 
-.PHONY: help up build build-k3s deploy wait test scenario prom alerts down
+.PHONY: help up build build-k3s deploy wait test scenario prom alerts down reader-kubeconfig
 
 help:
 	@echo "make up        create the k3d cluster"
@@ -12,6 +12,7 @@ help:
 	@echo "make test      unit tests + scenario validation (no cluster needed)"
 	@echo "make scenario S=S001   inject, wait for alert, save incident, revert"
 	@echo "make prom      Prometheus UI on http://localhost:9090"
+	@echo "make reader-kubeconfig   read-only kubeconfig for the MCP servers (.kube/reader.yaml)"
 	@echo "make down      delete the cluster"
 
 up:
@@ -42,7 +43,12 @@ wait:
 
 test:
 	cd apps/shop && $(PY) -m unittest -q
+	$(PY) -m unittest discover -q -s mcp_servers/prometheus
+	$(PY) -m unittest discover -q -s mcp_servers/kube
 	$(PY) scenarios/runner.py validate
+
+reader-kubeconfig:
+	bash scripts/reader-kubeconfig.sh .kube/reader.yaml
 
 scenario:
 	$(PY) scenarios/runner.py run $(S)

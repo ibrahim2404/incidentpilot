@@ -1,0 +1,32 @@
+# Identity used by the kubernetes and logs MCP servers.
+# Least privilege: read-only, only in the shop namespace, and no access to Secrets.
+# Even a bug or a prompt injection in the agent cannot change the cluster through it.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: incidentpilot-reader, namespace: shop}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: incidentpilot-reader, namespace: shop}
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, configmaps, services, endpoints]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: incidentpilot-reader, namespace: shop}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: incidentpilot-reader}
+subjects: [{kind: ServiceAccount, name: incidentpilot-reader, namespace: shop}]
+---
+# Long-lived token for the ServiceAccount (read by scripts/reader-kubeconfig.sh).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: incidentpilot-reader-token
+  namespace: shop
+  annotations: {kubernetes.io/service-account.name: incidentpilot-reader}
+type: kubernetes.io/service-account-token

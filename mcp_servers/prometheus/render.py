@@ -8,7 +8,9 @@ from __future__ import annotations
 
 MAX_SERIES = 15
 MAX_POINTS = 12
+# Labels that are long, unique per container and useless for diagnosis: they only cost tokens.
 NOISY_LABELS = {"id", "name", "image", "uid"}
+
 
 def labels(metric: dict) -> str:
     """{'__name__': 'up', 'job': 'pods', 'pod': 'orders-1'} -> 'up{job="pods", pod="orders-1"}'"""

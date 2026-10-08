@@ -14,7 +14,7 @@ import httpx
 
 
 class PrometheusError(Exception):
-    """The message shown to the model when Prometheus refused the query or could not be reached."""
+    """Prometheus refused the query or could not be reached. The message is shown to the model."""
 
 
 class Backend(Protocol):
@@ -28,7 +28,7 @@ class LiveBackend:
     def __init__(self, base_url: str, timeout_s: float = 10.0, at: float | None = None):
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
-        self.at = at  # None = real time
+        self.at = at  # fixed evaluation time for replays; None = real time
 
     def now(self) -> float:
         return self.at if self.at is not None else time.time()
@@ -57,5 +57,5 @@ class LiveBackend:
         return data["result"]
 
     def alerts(self) -> list[dict]:
-        r=self.instant('ALERTS{alertstate="firing"}')
-        return r
+        # The ALERTS metric is stored in the database, so it also works at a past "now" (replays).
+        return self.instant('ALERTS{alertstate="firing"}')
