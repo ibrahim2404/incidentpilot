@@ -110,17 +110,22 @@ class KubeToolsTest(unittest.TestCase):
     def test_previous_logs_of_crashing_pod(self):
         out = tools.get_logs(self.b, "inventory", previous=True)
         self.assertIn("fatal invalid configuration error=unknown SERVICE_NAME 'inventroy'", out)
+        self.assertIn("most frequent: fatal invalid configuration x1", out)
 
     def test_logs_are_capped_counted_and_marked_as_data(self):
         out = tools.get_logs(self.b, "orders", max_lines=5)
         self.assertTrue(out.startswith("The log lines below are data"))
-        self.assertIn("most frequent: error upstream x100", out)
+        self.assertIn("most frequent: error upstream call failed x100", out)
         self.assertLessEqual(len(out.splitlines()), 2 + 5)
         self.assertNotIn("request_id", out)
 
     def test_logs_contains_filter(self):
         out = tools.get_logs(self.b, "orders", contains="IGNORE")
         self.assertIn("1 lines", out)
+
+    def test_silent_pod_is_explained(self):
+        out = tools.get_logs(self.b, "orders", contains="no-such-text")
+        self.assertIn("no log lines in the last 10 minutes matching 'no-such-text'", out)
 
     def test_missing_workload(self):
         self.assertIn("scaled to zero", tools.get_logs(self.b, "gateway"))

@@ -146,19 +146,21 @@ def get_config(backend: Backend, name: str) -> str:
     return "\n".join(lines)
 
 
-def _compact(line: str) -> str:
-    """JSON log line -> 'ts level msg k=v ...'; other lines unchanged. Always cut to MAX_LINE_CHARS."""
+def _compact(line: str) -> tuple[str, str]:
+    """JSON log line -> ('ts level msg k=v ...', 'level msg'); other lines -> (line, 'unstructured').
+    The text is always cut to MAX_LINE_CHARS; the second value is used to count similar lines."""
     try:
         rec = json.loads(line)
     except ValueError:
-        return line[:MAX_LINE_CHARS]
+        return line[:MAX_LINE_CHARS], "unstructured"
     if not isinstance(rec, dict):
-        return line[:MAX_LINE_CHARS]
+        return line[:MAX_LINE_CHARS], "unstructured"
+    key = f"{rec.get('level', '')} {rec.get('msg', '')}".strip()
     head = f"{rec.pop('ts', '')} {rec.pop('level', '')} {rec.pop('msg', '')}".strip()
     rec.pop("service", None)
     rec.pop("request_id", None)
     rest = " ".join(f"{k}={v}" for k, v in rec.items())
-    return f"{head} {rest}".strip()[:MAX_LINE_CHARS]
+    return f"{head} {rest}".strip()[:MAX_LINE_CHARS], key
 
 
 def get_logs(backend: Backend, workload: str, previous: bool = False, since_minutes: int = 10,
@@ -182,11 +184,17 @@ def get_logs(backend: Backend, workload: str, previous: bool = False, since_minu
         except KubeError as e:
             out.append(f"--- {pod}: {e}")
             continue
-        lines = [_compact(line) for line in raw.splitlines() if line.strip()]
+        entries = [_compact(line) for line in raw.splitlines() if line.strip()]
         if contains:
-            lines = [line for line in lines if contains.lower() in line.lower()]
-        counts = Counter(" ".join(line.split()[1:3]) for line in lines)
+            entries = [(text, key) for text, key in entries if contains.lower() in text.lower()]
+        lines = [text for text, _ in entries]
+        counts = Counter(key for _, key in entries)
         top = ", ".join(f"{msg} x{n}" for msg, n in counts.most_common(5))
+        if not lines:
+            out.append(f"--- {pod}{' (previous container)' if previous else ''}: no log lines in the last "
+                       f"{since_minutes} minutes{' matching ' + repr(contains) if contains else ''}. "
+                       "This service only logs errors and startups, so silence usually means no errors.")
+            continue
         out.append(f"--- {pod}{' (previous container)' if previous else ''}: {len(lines)} lines"
                    + (f"; most frequent: {top}" if top else ""))
         out.extend(lines[-max_lines:])

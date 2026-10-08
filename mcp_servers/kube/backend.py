@@ -60,7 +60,11 @@ class LiveBackend:
     def items(self, kind: str) -> list[dict]:
         if kind not in KINDS:
             raise KubeError(f"kind {kind!r} is not allowed")
-        return json.loads(self._kubectl("get", kind, "-o", "json"))["items"]
+        args = ["get", kind, "-o", "json"]
+        if kind == "configmaps":
+            # kubectl hides managedFields by default; they hold the last-modified time of each change.
+            args.append("--show-managed-fields")
+        return json.loads(self._kubectl(*args))["items"]
 
     def logs(self, pod: str, previous: bool, since_s: int, tail: int) -> str:
         args = ["logs", pod, f"--since={since_s}s", f"--tail={tail}"]
