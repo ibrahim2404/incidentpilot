@@ -100,6 +100,18 @@ class LoopTest(unittest.TestCase):
         self.assertIn("truncated", sent)
 
 
+class FailingLLM:
+    async def __call__(self, messages, tools):
+        raise RuntimeError("quota exhausted")
+
+
+class ErrorTest(unittest.TestCase):
+    def test_llm_error_is_recorded_not_raised(self):
+        r, _ = run(FailingLLM())
+        self.assertIsNone(r.diagnosis)
+        self.assertTrue(r.stop_reason.startswith("llm_error: RuntimeError: quota exhausted"))
+
+
 class ScoreTest(unittest.TestCase):
     truth = {"component": "inventory", "fault": "crash_loop", "also_accept": ["bad_config"]}
 

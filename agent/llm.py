@@ -14,7 +14,7 @@ import os
 
 PROVIDERS = {
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-               "key_env": "GEMINI_API_KEY", "default_model": "gemini-2.5-flash"},
+               "key_env": "GEMINI_API_KEY", "default_model": "gemini-3.8-flash"},
     "groq": {"base_url": "https://api.groq.com/openai/v1",
              "key_env": "GROQ_API_KEY", "default_model": "openai/gpt-oss-120b"},
 }

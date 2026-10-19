@@ -53,7 +53,12 @@ async def investigate(alert_text: str, tools: list[dict], llm: LLM, call_tool: T
 
     for step in range(1, max_steps + 1):
         result.steps = step
-        reply = await llm(messages, all_tools)
+        try:
+            reply = await llm(messages, all_tools)
+        except Exception as e:  # provider down, quota exhausted, bad model id: record it, don't crash an eval
+            result.stop_reason = f"llm_error: {type(e).__name__}: {str(e)[:300]}"
+            result.seconds = time.monotonic() - started
+            return result
         usage = reply.get("usage") or {}
         result.prompt_tokens += usage.get("prompt_tokens", 0)
         result.completion_tokens += usage.get("completion_tokens", 0)

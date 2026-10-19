@@ -2,7 +2,8 @@
 
   python scenarios/runner.py list
   python scenarios/runner.py validate
-  python scenarios/runner.py run S001 [--keep]   # inject -> wait for alert -> save incident -> revert
+  python scenarios/runner.py run S001 [--keep] [--record]
+      inject -> wait for alert -> save incident -> (record golden/<id>-<ts>/) -> revert
   python scenarios/runner.py inject S001 | revert S001
   python scenarios/runner.py alerts              # currently firing alerts
 
@@ -85,7 +86,7 @@ def wait_for(predicate, timeout_s, what, interval=10):
     return None
 
 
-def cmd_run(s, keep=False):
+def cmd_run(s, keep=False, do_record=False):
     names = lambda: {a["labels"]["alertname"] for a in firing_alerts()}
     # Never mix two incidents: wait (up to 6 min) for alerts left by a previous run to clear.
     if names() and not wait_for(lambda: not names() or None, 360, "previous alerts to clear", interval=15):
@@ -109,6 +110,10 @@ def cmd_run(s, keep=False):
     with open(out, "w") as f:
         json.dump(record, f, indent=2)
     print(f"saved {out}", file=sys.stderr)
+    if do_record and ok:
+        import recorder
+        meta = {k: s[k] for k in ("title", "difficulty") if k in s}
+        recorder.record(os.path.join(ROOT, "golden", os.path.basename(out)[:-5]), dict(record, **meta))
     if not keep:
         for step in s["revert"]:
             kubectl(step)
@@ -125,6 +130,7 @@ def main(argv=None):
     p.add_argument("command", choices=["list", "validate", "run", "inject", "revert", "alerts"])
     p.add_argument("scenario", nargs="?")
     p.add_argument("--keep", action="store_true", help="leave the fault in place after run")
+    p.add_argument("--record", action="store_true", help="freeze metrics, kube state and logs into golden/")
     a = p.parse_args(argv)
     scenarios = load_all()
 
@@ -148,7 +154,7 @@ def main(argv=None):
         raise SystemExit(f"unknown scenario {a.scenario!r}; try `list`")
     s = scenarios[a.scenario]
     if a.command == "run":
-        cmd_run(s, keep=a.keep)
+        cmd_run(s, keep=a.keep, do_record=a.record)
     else:
         for step in s[a.command]:
             kubectl(step)

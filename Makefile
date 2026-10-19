@@ -2,7 +2,7 @@ CLUSTER ?= incidentpilot
 IMAGE   ?= incidentpilot/shop:dev
 PY      ?= python3
 
-.PHONY: help up build build-k3s deploy wait test scenario prom alerts down reader-kubeconfig incident
+.PHONY: help up build build-k3s deploy wait test scenario prom alerts down reader-kubeconfig incident replay-tools record golden eval
 
 help:
 	@echo "make up        create the k3d cluster"
@@ -69,3 +69,23 @@ incident:
 	$(PY) scenarios/runner.py run $(ID) --keep
 	$(PY) agent/run.py --incident $$(ls -t runs/$(ID)-*.json | head -1) || true
 	$(PY) scenarios/runner.py revert $(ID)
+
+# prometheus + promtool binaries used to replay recorded incidents (no cluster needed)
+PROM_VERSION ?= 2.55.1
+replay-tools:
+	mkdir -p .bin && curl -sSL https://github.com/prometheus/prometheus/releases/download/v$(PROM_VERSION)/prometheus-$(PROM_VERSION).linux-amd64.tar.gz \
+	  | tar xz -C .bin --strip-components=1 prometheus-$(PROM_VERSION).linux-amd64/prometheus prometheus-$(PROM_VERSION).linux-amd64/promtool
+	.bin/promtool --version | head -1
+
+# Record one incident into golden/ (inject, wait for alert, freeze metrics/kube/logs, revert)
+# make record ID=S002
+record:
+	$(PY) scenarios/runner.py run $(ID) --record
+
+# Record every scenario (one after the other; each waits for the cluster to be healthy first)
+golden:
+	for s in $$($(PY) scenarios/runner.py list | cut -d' ' -f1); do $(PY) scenarios/runner.py run $$s --record || exit 1; done
+
+# Replay evaluation on golden/. make eval ARGS="--repeats 1 --only S002"
+eval:
+	$(PY) agent/evaluate.py $(ARGS)

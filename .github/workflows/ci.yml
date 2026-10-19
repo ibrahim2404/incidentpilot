@@ -16,7 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: pip install pyyaml httpx
+      - run: pip install -r requirements.txt
+      - run: make replay-tools   # enables the replay and end-to-end MCP tests
       - run: make test
 
   scenarios:

@@ -9,4 +9,6 @@ runs/
 .terraform.lock.hcl.bak
 .kube/
 results/
+.bin/
+golden/*/.tsdb/
 *docx
