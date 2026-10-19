@@ -8,3 +8,5 @@ runs/
 *.tfvars
 .terraform.lock.hcl.bak
 .kube/
+results/
+*docx

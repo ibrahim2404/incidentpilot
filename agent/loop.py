@@ -1,0 +1,105 @@
+"""The agent loop, independent of the LLM provider and of MCP (both are injected), so it is unit-testable.
+
+llm(messages, tools) -> {"content": str|None, "tool_calls": [{"id", "name", "arguments"}], "usage": {...}}
+call_tool(name, args) -> str
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass, field
+from typing import Awaitable, Callable
+
+from prompts import ACTIONS, COMPONENTS, FAULTS, SUBMIT_TOOL, SYSTEM
+
+LLM = Callable[[list[dict], list[dict]], Awaitable[dict]]
+ToolCaller = Callable[[str, dict], Awaitable[str]]
+
+MAX_STEPS = 12
+MAX_TOOL_CHARS = 2500  # keeps every request well under small context / per-request limits
+
+
+@dataclass
+class Result:
+    diagnosis: dict | None
+    steps: int = 0
+    tool_calls: list[dict] = field(default_factory=list)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    seconds: float = 0.0
+    stop_reason: str = ""
+
+
+def validate(args: dict) -> str | None:
+    """Return an error message for the model, or None if the diagnosis is well formed."""
+    if args.get("component") not in COMPONENTS:
+        return f"component must be one of {COMPONENTS}"
+    if args.get("fault") not in FAULTS:
+        return f"fault must be one of {FAULTS}"
+    if args.get("proposed_action") not in ACTIONS:
+        return f"proposed_action must be one of {ACTIONS}"
+    if not isinstance(args.get("evidence"), list) or not args["evidence"]:
+        return "evidence must be a non-empty list of short facts"
+    return None
+
+
+async def investigate(alert_text: str, tools: list[dict], llm: LLM, call_tool: ToolCaller,
+                      max_steps: int = MAX_STEPS) -> Result:
+    started = time.monotonic()
+    messages: list[dict] = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": alert_text}]
+    all_tools = tools + [SUBMIT_TOOL]
+    result = Result(diagnosis=None)
+
+    for step in range(1, max_steps + 1):
+        result.steps = step
+        reply = await llm(messages, all_tools)
+        usage = reply.get("usage") or {}
+        result.prompt_tokens += usage.get("prompt_tokens", 0)
+        result.completion_tokens += usage.get("completion_tokens", 0)
+        calls = reply.get("tool_calls") or []
+        messages.append({
+            "role": "assistant", "content": reply.get("content") or "",
+            **({"tool_calls": [{"id": c["id"], "type": "function",
+                                "function": {"name": c["name"], "arguments": c["arguments"]}} for c in calls]}
+               if calls else {}),
+        })
+        if not calls:
+            messages.append({"role": "user", "content": "Use a tool, or call submit_diagnosis if the evidence is clear."})
+            continue
+        for c in calls:
+            try:
+                args = json.loads(c["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args, output = {}, "ERROR: arguments were not valid JSON."
+            else:
+                if c["name"] == "submit_diagnosis":
+                    problem = validate(args)
+                    if problem is None:
+                        result.diagnosis = args
+                        result.stop_reason = "submitted"
+                        result.seconds = time.monotonic() - started
+                        return result
+                    output = f"ERROR: {problem}. Call submit_diagnosis again."
+                else:
+                    t0 = time.monotonic()
+                    output = await call_tool(c["name"], args)
+                    result.tool_calls.append({"name": c["name"], "args": args,
+                                              "seconds": round(time.monotonic() - t0, 2),
+                                              "chars": len(output), "error": output.startswith("ERROR")})
+            if len(output) > MAX_TOOL_CHARS:
+                output = output[:MAX_TOOL_CHARS] + "\n[truncated: narrow the query]"
+            messages.append({"role": "tool", "tool_call_id": c["id"], "content": output})
+
+    result.stop_reason = "max_steps"
+    result.seconds = time.monotonic() - started
+    return result
+
+
+def score(diagnosis: dict | None, truth: dict) -> dict:
+    """Exact match on component + fault (also_accept lists other acceptable fault labels)."""
+    if not diagnosis:
+        return {"component_ok": False, "fault_ok": False, "correct": False}
+    component_ok = diagnosis.get("component") == truth["component"]
+    fault_ok = diagnosis.get("fault") in [truth["fault"], *truth.get("also_accept", [])]
+    return {"component_ok": component_ok, "fault_ok": fault_ok, "correct": component_ok and fault_ok}

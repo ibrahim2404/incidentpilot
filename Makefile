@@ -2,7 +2,7 @@ CLUSTER ?= incidentpilot
 IMAGE   ?= incidentpilot/shop:dev
 PY      ?= python3
 
-.PHONY: help up build build-k3s deploy wait test scenario prom alerts down reader-kubeconfig
+.PHONY: help up build build-k3s deploy wait test scenario prom alerts down reader-kubeconfig incident
 
 help:
 	@echo "make up        create the k3d cluster"
@@ -45,6 +45,7 @@ test:
 	cd apps/shop && $(PY) -m unittest -q
 	$(PY) -m unittest discover -q -s mcp_servers/prometheus
 	$(PY) -m unittest discover -q -s mcp_servers/kube
+	$(PY) -m unittest discover -q -s agent
 	$(PY) scenarios/runner.py validate
 
 reader-kubeconfig:
@@ -61,3 +62,10 @@ alerts:
 
 down:
 	k3d cluster delete $(CLUSTER)
+
+# Full live loop for one scenario: inject + wait for alert, diagnose, always revert.
+# make incident ID=S002
+incident:
+	$(PY) scenarios/runner.py run $(ID) --keep
+	$(PY) agent/run.py --incident $$(ls -t runs/$(ID)-*.json | head -1) || true
+	$(PY) scenarios/runner.py revert $(ID)
