@@ -8,7 +8,6 @@ Skipped unless the MCP SDK v2 and the prometheus/promtool binaries are installed
 
 import asyncio
 import gzip
-import importlib.util
 import json
 import os
 import shutil
@@ -24,9 +23,7 @@ import replay  # noqa: E402
 from recorder import to_openmetrics  # noqa: E402
 from test_loop import FakeLLM, GOOD, call  # noqa: E402
 from test_replay import counter, have_binaries  # noqa: E402
-
-_spec = importlib.util.spec_from_file_location("kube_fixture", os.path.join(ROOT, "mcp_servers", "kube", "test_tools.py"))
-
+from testutil import server_modules  # noqa: E402
 
 def have_mcp_v2():
     try:
@@ -39,9 +36,7 @@ def have_mcp_v2():
 @unittest.skipUnless(have_mcp_v2() and have_binaries(), "needs MCP SDK v2 and prometheus binaries")
 class E2EReplayTest(unittest.TestCase):
     def setUp(self):
-        sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "kube"))
-        kube_fixture = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(kube_fixture)
+        kube_fixture, = server_modules("kube", "test_tools")  # its make_fixture() builds the kube folder
         self.dir = tempfile.mkdtemp()
         at = kube_fixture.NOW_TS
         os.makedirs(os.path.join(self.dir, "kube"))
@@ -74,7 +69,9 @@ class E2EReplayTest(unittest.TestCase):
             [call("submit_diagnosis", dict(GOOD, fault="crash_loop"), 4)],
         )
         llm.provider, llm.model = "fake", "scripted"
-        record = asyncio.run(run_one(llm, json.load(open(os.path.join(self.dir, "incident.json"))), self.dir))
+        with open(os.path.join(self.dir, "incident.json")) as f:
+            incident = json.load(f)
+        record = asyncio.run(run_one(llm, incident, self.dir))
 
         outputs = {m["tool_call_id"]: m["content"] for m in llm.seen[2][0] if m["role"] == "tool"}
         self.assertIn('alertname="HighErrorRate"', outputs["c0"])

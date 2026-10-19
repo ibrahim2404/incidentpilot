@@ -11,10 +11,11 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path[:0] = [HERE, os.path.join(ROOT, "scenarios"), os.path.join(ROOT, "mcp_servers", "prometheus")]
+sys.path[:0] = [HERE, os.path.join(ROOT, "scenarios")]
 
 from recorder import to_openmetrics  # noqa: E402
 import replay  # noqa: E402
+from testutil import server_modules  # noqa: E402
 
 AT = 1_760_000_000.0  # a past time: replays must not depend on the wall clock
 
@@ -91,8 +92,8 @@ class ReplayTest(unittest.TestCase):
         shutil.rmtree(self.dir)
 
     def test_tools_see_the_recorded_incident(self):
-        import tools
-        from backend import LiveBackend
+        tools, backend = server_modules("prometheus", "tools", "backend")
+        LiveBackend = backend.LiveBackend
         with replay.Replay(self.dir) as env:
             b = LiveBackend(env["PROM_URL"], at=float(env["PROM_AT"]))
             self.assertIn('alertname="HighErrorRate"', tools.list_alerts(b))

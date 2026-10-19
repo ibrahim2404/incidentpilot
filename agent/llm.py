@@ -20,6 +20,19 @@ PROVIDERS = {
 }
 
 
+# Free tiers fail in two transient ways: 429 (requests per minute) and 503 (model overloaded).
+# Waiting is right for both; switching provider mid-investigation would mix two models in one result.
+BACKOFF_S = [10, 20, 40, 60, 90]
+
+
+def is_transient(e: Exception) -> bool:
+    from openai import APIConnectionError, APIStatusError, APITimeoutError
+
+    if isinstance(e, (APIConnectionError, APITimeoutError)):
+        return True
+    return isinstance(e, APIStatusError) and (e.status_code == 429 or e.status_code >= 500)
+
+
 def _client_class():
     if os.environ.get("LANGFUSE_PUBLIC_KEY"):
         from langfuse.openai import AsyncOpenAI  # drop-in wrapper that traces every call
@@ -39,17 +52,15 @@ class ChatLLM:
         self.client = _client_class()(base_url=cfg["base_url"], api_key=key, max_retries=0)
 
     async def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
-        from openai import RateLimitError
-
-        for attempt in range(5):
+        for attempt in range(len(BACKOFF_S) + 1):
             try:
                 resp = await self.client.chat.completions.create(
                     model=self.model, messages=messages, tools=tools, tool_choice="auto", temperature=0)
                 break
-            except RateLimitError:
-                if attempt == 4:
+            except Exception as e:
+                if not is_transient(e) or attempt == len(BACKOFF_S):
                     raise
-                await asyncio.sleep(15 * (attempt + 1))  # free tiers count requests per minute
+                await asyncio.sleep(BACKOFF_S[attempt])
         msg = resp.choices[0].message
         usage = resp.usage
         return {
