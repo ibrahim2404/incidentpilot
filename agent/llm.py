@@ -16,11 +16,16 @@ import time
 
 PROVIDERS = {
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-               "key_env": "GEMINI_API_KEY", "default_model": "gemini-3.5-flash", "rpm": 5},
+               "key_env": "GEMINI_API_KEY", "default_model": "gemini-3.5-flash-lite", "rpm": 5},
     "groq": {"base_url": "https://api.groq.com/openai/v1",
              "key_env": "GROQ_API_KEY", "default_model": "openai/gpt-oss-120b", "rpm": 30},
 }
 
+
+# Free-tier requests per minute by model (provider "rpm" is the fallback; LLM_RPM overrides both).
+# Requests per day matter as much: 3.6-flash allows 20/day, 3.5-flash-lite 500/day, so lite is the
+# workhorse and 3.6-flash is reserved for escalations.
+MODEL_RPM = {"gemini-3.5-flash-lite": 15, "gemini-3.6-flash": 5}
 
 # Free tiers fail in two transient ways: 429 (requests per minute) and 503 (model overloaded).
 # Waiting is right for both; switching provider mid-investigation would mix two models in one result.
@@ -70,7 +75,8 @@ class ChatLLM:
         self.model = model or os.environ.get("LLM_MODEL", cfg["default_model"])
         self.client = _client_class()(base_url=cfg["base_url"], api_key=key, max_retries=0)
         # Pace requests under the free-tier requests-per-minute quota instead of hitting 429s.
-        self.min_interval_s = 60.0 / float(os.environ.get("LLM_RPM", cfg["rpm"]))
+        rpm = os.environ.get("LLM_RPM") or MODEL_RPM.get(self.model, cfg["rpm"])
+        self.min_interval_s = 60.0 / float(rpm)
         self._last_start = 0.0
 
     async def _pace(self) -> float:

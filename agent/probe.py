@@ -21,7 +21,7 @@ from llm import PROVIDERS  # noqa: E402
 from run import load_env  # noqa: E402
 
 CANDIDATES = {
-    "gemini": ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"],
+    "gemini": ["gemini-3.5-flash-lite", "gemini-3.6-flash"],
     "groq": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
 }
 TOOL = {"type": "function", "function": {
