@@ -60,6 +60,14 @@ class LoopTest(unittest.TestCase):
         last = llm.seen[1][0][-1]
         self.assertEqual((last["role"], last["tool_call_id"], last["content"]), ("tool", "c0", "ok"))
 
+    def test_provider_extra_is_echoed_back(self):
+        signed = dict(call("list_pods", {}), extra={"extra_content": {"google": {"thought_signature": "sig=="}}})
+        llm = FakeLLM([signed], [call("submit_diagnosis", GOOD, 1)])
+        run(llm)
+        sent = llm.seen[1][0][-2]["tool_calls"][0]  # the assistant turn as sent back to the model
+        self.assertEqual(sent["extra_content"], {"google": {"thought_signature": "sig=="}})
+        self.assertEqual((sent["id"], sent["function"]["name"]), ("c0", "list_pods"))
+
     def test_submit_tool_is_offered(self):
         llm = FakeLLM([call("submit_diagnosis", GOOD)])
         run(llm)

@@ -1,6 +1,7 @@
 """The agent loop, independent of the LLM provider and of MCP (both are injected), so it is unit-testable.
 
-llm(messages, tools) -> {"content": str|None, "tool_calls": [{"id", "name", "arguments"}], "usage": {...}}
+llm(messages, tools) -> {"content": str|None, "tool_calls": [{"id", "name", "arguments", "extra"?}], "usage": {...}}
+  "extra": provider-specific fields of the call (e.g. Gemini thought signatures), echoed back verbatim.
 call_tool(name, args) -> str
 """
 
@@ -64,8 +65,9 @@ async def investigate(alert_text: str, tools: list[dict], llm: LLM, call_tool: T
         result.completion_tokens += usage.get("completion_tokens", 0)
         calls = reply.get("tool_calls") or []
         messages.append({
+            **(reply.get("extra") or {}),
             "role": "assistant", "content": reply.get("content") or "",
-            **({"tool_calls": [{"id": c["id"], "type": "function",
+            **({"tool_calls": [{**(c.get("extra") or {}), "id": c["id"], "type": "function",
                                 "function": {"name": c["name"], "arguments": c["arguments"]}} for c in calls]}
                if calls else {}),
         })

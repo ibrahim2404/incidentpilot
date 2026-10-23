@@ -14,7 +14,7 @@ import os
 
 PROVIDERS = {
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-               "key_env": "GEMINI_API_KEY", "default_model": "gemini-3.8-flash"},
+               "key_env": "GEMINI_API_KEY", "default_model": "gemini-3.5-flash"},
     "groq": {"base_url": "https://api.groq.com/openai/v1",
              "key_env": "GROQ_API_KEY", "default_model": "openai/gpt-oss-120b"},
 }
@@ -31,6 +31,17 @@ def is_transient(e: Exception) -> bool:
     if isinstance(e, (APIConnectionError, APITimeoutError)):
         return True
     return isinstance(e, APIStatusError) and (e.status_code == 429 or e.status_code >= 500)
+
+
+def provider_extra(tool_call) -> dict:
+    """Fields a provider adds to a tool call beyond the OpenAI schema, to send back unchanged.
+
+    Gemini 3 puts a thought signature in extra_content.google.thought_signature and rejects the
+    next request (400) if the call comes back without it: the model resumes its reasoning from it.
+    """
+    extra = getattr(tool_call, "model_extra", None) or {}
+    return {k: v for k, v in extra.items()
+            if k not in ("id", "type", "function", "index", "role", "content", "tool_calls") and v is not None}
 
 
 def _client_class():
@@ -65,7 +76,9 @@ class ChatLLM:
         usage = resp.usage
         return {
             "content": msg.content,
-            "tool_calls": [{"id": c.id, "name": c.function.name, "arguments": c.function.arguments}
+            "extra": provider_extra(msg),  # message-level provider fields, echoed back the same way
+            "tool_calls": [{"id": c.id, "name": c.function.name, "arguments": c.function.arguments,
+                            "extra": provider_extra(c)}
                            for c in (msg.tool_calls or [])],
             "usage": {"prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
                       "completion_tokens": getattr(usage, "completion_tokens", 0) or 0},
