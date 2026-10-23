@@ -1,0 +1,7 @@
+# Applied by scenario S014. A neutral-looking name, as a real hardening change would have.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: inventory-ingress, namespace: shop}
+spec:
+  podSelector: {matchLabels: {app: inventory}}
+  policyTypes: [Ingress]

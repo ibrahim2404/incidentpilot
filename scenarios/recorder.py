@@ -28,7 +28,7 @@ PROM_PROXY = "/api/v1/namespaces/monitoring/services/prometheus:9090/proxy"
 NAMESPACE = "shop"
 WINDOW_MIN = 180  # = the agent's query_range limit, so no query reaches before the recording
 SELECTORS = [f'{{namespace="{NAMESPACE}"}}', '{__name__=~"ALERTS|ALERTS_FOR_STATE"}']
-KINDS = ["pods", "deployments", "replicasets", "events", "configmaps", "services", "endpoints"]
+KINDS = ["pods", "deployments", "replicasets", "events", "configmaps", "services", "endpoints", "networkpolicies"]
 LOG_TAIL = 1000
 
 

@@ -1,0 +1,29 @@
+id: S016
+title: Inventory goes down right after an unrelated gateway config change
+difficulty: L3
+ground_truth:
+  component: inventory
+  fault: dependency_down
+  expected_remediation: scale_up
+  summary: >
+    gateway-config got a new key (LOG_SAMPLING_RATE, unused by the app) and gateway was
+    restarted; a minute later inventory was scaled to 0. Trap: the most recent visible
+    change is on gateway, the service that alerts, but it cannot explain the errors:
+    gateway's own upstream calls fail because orders cannot reach inventory.
+  evidence:
+    - inventory desired 0 / ready 0
+    - orders upstream outcome connection_refused to inventory
+    - the gateway-config change adds a key the errors do not involve
+inject:
+  - [-n, shop, patch, configmap, gateway-config, --type, merge, -p, '{"data":{"LOG_SAMPLING_RATE":"0.1"}}']
+  - [-n, shop, rollout, restart, deployment/gateway]
+  - [-n, shop, rollout, status, deployment/gateway, --timeout=120s]
+  - [-n, shop, scale, deployment/inventory, --replicas=0]
+expect_alerts: [HighErrorRate]
+timeout_s: 300
+revert:
+  - [-n, shop, scale, deployment/inventory, --replicas=1]
+  - [-n, shop, patch, configmap, gateway-config, --type, merge, -p, '{"data":{"LOG_SAMPLING_RATE":null}}']
+  - [-n, shop, rollout, restart, deployment/gateway]
+  - [-n, shop, rollout, status, deployment/gateway, --timeout=120s]
+  - [-n, shop, rollout, status, deployment/inventory, --timeout=120s]

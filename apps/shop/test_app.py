@@ -51,6 +51,18 @@ class ChainTest(unittest.TestCase):
         self.assertIn('http_requests_total{service="gateway",route="/api/checkout",code="200"} 1', metrics)
         self.assertIn('upstream_requests_total{service="gateway",upstream="orders",outcome="ok"} 1', metrics)
 
+    def test_unknown_route_is_logged_with_its_path(self):
+        import contextlib
+        import io
+        _, h, url = start({"SERVICE_NAME": "inventory"})
+        self.servers.append(h)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code, _ = get(url + "/admin/notes?text=hello+there")
+        self.assertEqual(code, 404)
+        line = json.loads(out.getvalue().strip().splitlines()[-1])
+        self.assertEqual((line["level"], line["msg"], line["path"]), ("warn", "route not found", "/admin/notes?text=hello+there"))
+
     def test_dependency_down_propagates(self):
         gw, ord_url, _ = self.chain(inventory_up=False)
         code, _ = get(gw + "/api/checkout")

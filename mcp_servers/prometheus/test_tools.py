@@ -103,6 +103,13 @@ class ToolsTest(unittest.TestCase):
         self.assertIn("inventory/connection_refused 0.8", out)
         self.assertIn("requests per second: no data", out)
 
+    def test_overview_shows_real_limits_per_pod(self):
+        q = tools.OVERVIEW["memory limit by pod (MiB)"].format(s="orders")
+        b = FakeBackend(answers={q: [series(96, pod="orders-old"), series(6, pod="orders-new")]})
+        out = tools.service_overview(b, "orders")
+        self.assertIn("memory limit by pod (MiB): orders-new 6; orders-old 96", out)
+        self.assertNotIn("limit is", out)  # limits come from the cluster, never hardcoded
+
 
 if __name__ == "__main__":
     unittest.main()

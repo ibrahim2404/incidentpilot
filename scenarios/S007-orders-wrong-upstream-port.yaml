@@ -1,0 +1,25 @@
+id: S007
+title: Orders config points at the wrong inventory port; inventory itself is healthy
+difficulty: L2
+ground_truth:
+  component: orders
+  fault: bad_config
+  expected_remediation: rollback_config
+  summary: >
+    orders-config UPSTREAM_URL was changed to port 8081, which the inventory Service does
+    not expose. Calls from orders to inventory fail, so orders and gateway return 5xx.
+    Trap: every error mentions inventory, but inventory is Ready, has no errors of its
+    own, and simply stops receiving requests.
+  evidence:
+    - orders-config UPSTREAM_URL changed minutes before the alert, now ends in :8081
+    - orders upstream calls to inventory fail (timeout or connection refused)
+    - inventory pods Ready, inventory request rate drops to zero, no inventory errors
+inject:
+  - [-n, shop, patch, configmap, orders-config, --type, merge, -p, '{"data":{"UPSTREAM_URL":"http://inventory.shop.svc.cluster.local:8081"}}']
+  - [-n, shop, rollout, restart, deployment/orders]
+expect_alerts: [HighErrorRate]
+timeout_s: 300
+revert:
+  - [-n, shop, patch, configmap, orders-config, --type, merge, -p, '{"data":{"UPSTREAM_URL":"http://inventory.shop.svc.cluster.local:8080"}}']
+  - [-n, shop, rollout, restart, deployment/orders]
+  - [-n, shop, rollout, status, deployment/orders, --timeout=120s]

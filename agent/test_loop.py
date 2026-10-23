@@ -68,6 +68,14 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(sent["extra_content"], {"google": {"thought_signature": "sig=="}})
         self.assertEqual((sent["id"], sent["function"]["name"]), ("c0", "list_pods"))
 
+    def test_served_model_and_quota_wait_are_recorded(self):
+        class ModelLLM(FakeLLM):
+            async def __call__(self, messages, tools):
+                reply = await super().__call__(messages, tools)
+                return dict(reply, model="gemini-3.6-flash", waited_s=12.0)
+        r, _ = run(ModelLLM([call("list_pods", {})], [call("submit_diagnosis", GOOD, 1)]))
+        self.assertEqual((r.served_models, r.waited_s), (["gemini-3.6-flash"], 24.0))
+
     def test_submit_tool_is_offered(self):
         llm = FakeLLM([call("submit_diagnosis", GOOD)])
         run(llm)
@@ -127,6 +135,18 @@ class ScoreTest(unittest.TestCase):
         self.assertTrue(score({"component": "inventory", "fault": "crash_loop"}, self.truth)["correct"])
         self.assertTrue(score({"component": "inventory", "fault": "bad_config"}, self.truth)["correct"])
 
+    def test_remediation_scored_separately(self):
+        truth = dict(self.truth, expected_remediation=["rollback_config", "rollback_deployment"])
+        s = score({"component": "inventory", "fault": "crash_loop", "proposed_action": "scale_up"}, truth)
+        self.assertEqual((s["correct"], s["action_ok"]), (True, False))
+        s = score({"component": "inventory", "fault": "crash_loop", "proposed_action": "rollback_deployment"}, truth)
+        self.assertTrue(s["action_ok"])
+        self.assertIsNone(score({"component": "inventory", "fault": "crash_loop"}, self.truth)["action_ok"])
+
+    def test_also_accept_component(self):
+        truth = {"component": "gateway", "fault": "traffic_surge", "also_accept_component": ["orders"]}
+        self.assertTrue(score({"component": "orders", "fault": "traffic_surge"}, truth)["correct"])
+
     def test_wrong_component_or_none(self):
         self.assertFalse(score({"component": "orders", "fault": "crash_loop"}, self.truth)["correct"])
         self.assertFalse(score(None, self.truth)["correct"])
@@ -137,7 +157,7 @@ class PromptTest(unittest.TestCase):
         alerts = [{"labels": {"alertname": "HighErrorRate", "service": "gateway", "severity": "page"},
                    "annotations": {"summary": "gateway 5xx above 20%"}}]
         text = user_message(alerts)
-        self.assertIn("HighErrorRate on service=gateway", text)
+        self.assertIn("HighErrorRate on gateway", text)
         self.assertNotIn("inventory", text)
 
 

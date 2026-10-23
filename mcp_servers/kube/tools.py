@@ -71,6 +71,7 @@ def describe_workload(backend: Backend, name: str) -> str:
     try:
         deployments = {d["metadata"]["name"]: d for d in backend.items("deployments")}
         replicasets = backend.items("replicasets")
+        policies = backend.items("networkpolicies")
     except KubeError as e:
         return f"ERROR: {e}"
     d = deployments.get(name)
@@ -90,6 +91,16 @@ def describe_workload(backend: Backend, name: str) -> str:
         limits = c.get("resources", {}).get("limits", {})
         config = [e["configMapRef"]["name"] for e in c.get("envFrom", []) if "configMapRef" in e]
         lines.append(f"container {c['name']}: image {c['image']}, limits {limits or 'none'}, config from {config or 'none'}")
+        for kind in ("livenessProbe", "readinessProbe"):
+            if probe := c.get(kind):
+                lines.append(f"  {kind}: {_probe(probe)}")
+    pod_labels = spec["template"]["metadata"].get("labels", {})
+    selecting = [p for p in policies if _selects(p, pod_labels)]
+    for p in selecting:
+        lines.append(f"network policy {p['metadata']['name']} selects these pods "
+                     f"(created {_age(backend, p['metadata'].get('creationTimestamp'))} ago): {_policy(p)}")
+    if not selecting:
+        lines.append("network policies selecting these pods: none")
     owned = [rs for rs in replicasets if any(o.get("name") == name for o in rs["metadata"].get("ownerReferences", []))]
     owned.sort(key=lambda rs: int(rs["metadata"].get("annotations", {}).get("deployment.kubernetes.io/revision", "0")), reverse=True)
     for rs in owned[:3]:
@@ -98,6 +109,37 @@ def describe_workload(backend: Backend, name: str) -> str:
         lines.append(f"replicaset revision {rev}: replicas {st.get('replicas', 0)}, ready {st.get('readyReplicas', 0)}, "
                      f"created {_age(backend, rs['metadata'].get('creationTimestamp'))} ago")
     return "\n".join(lines)
+
+
+def _probe(p: dict) -> str:
+    if "httpGet" in p:
+        target = f"HTTP GET {p['httpGet'].get('path', '/')} port {p['httpGet'].get('port')}"
+    elif "tcpSocket" in p:
+        target = f"TCP port {p['tcpSocket'].get('port')}"
+    elif "exec" in p:
+        target = "exec " + " ".join(p["exec"].get("command", []))[:60]
+    else:
+        target = "?"
+    return (f"{target}, every {p.get('periodSeconds', 10)}s, timeout {p.get('timeoutSeconds', 1)}s, "
+            f"fails after {p.get('failureThreshold', 3)}, initial delay {p.get('initialDelaySeconds', 0)}s")
+
+
+def _selects(policy: dict, labels: dict) -> bool:
+    """matchLabels-only selector match (empty selector = every pod in the namespace)."""
+    selector = policy.get("spec", {}).get("podSelector", {})
+    if selector.get("matchExpressions"):
+        return True  # be conservative: show it rather than hide a policy that may apply
+    return all(labels.get(k) == v for k, v in selector.get("matchLabels", {}).items())
+
+
+def _policy(p: dict) -> str:
+    spec = p.get("spec", {})
+    types = spec.get("policyTypes", ["Ingress"])
+    parts = []
+    for t in types:
+        rules = spec.get(t.lower(), [])
+        parts.append(f"{t}: " + ("all traffic denied (no rule allows any)" if not rules else f"{len(rules)} allow rule(s)"))
+    return "; ".join(parts)
 
 
 def get_events(backend: Backend, minutes: int = 30) -> str:

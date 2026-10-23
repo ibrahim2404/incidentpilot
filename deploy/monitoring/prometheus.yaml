@@ -96,6 +96,14 @@ data:
             labels: {severity: page}
             annotations:
               summary: "{{ $labels.pod }}/{{ $labels.container }} restarted {{ $value | humanize }} times in 5m"
+          # A container that cannot get to running (image pull, crash loop, config error) for 3m.
+          # The waiting reason is deliberately not in the alert: the agent must find it.
+          - alert: ContainerWaiting
+            expr: max by (namespace, pod, container) (kube_pod_container_status_waiting{namespace="shop"}) == 1
+            for: 3m
+            labels: {severity: warn}
+            annotations:
+              summary: "{{ $labels.pod }}/{{ $labels.container }} has not been running for 3m"
           - alert: NoTraffic
             expr: sum(rate(http_requests_total{service="gateway"}[2m])) == 0
             for: 2m

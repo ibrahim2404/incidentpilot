@@ -209,6 +209,8 @@ def make_handler(app):
             if path == "/metrics":
                 return self._send(200, app.metrics.render().encode(), "text/plain; version=0.0.4")
             if path != route:
+                # access log for unknown routes (scanners, broken clients); the raw path is untrusted input
+                log(app.cfg.service, "warn", "route not found", path=self.path[:300])
                 return self._send(404, {"error": "not found"})
             rid = self.headers.get("X-Request-Id") or str(uuid.uuid4())
             start = time.monotonic()

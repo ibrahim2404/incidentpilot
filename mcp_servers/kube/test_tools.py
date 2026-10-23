@@ -35,9 +35,11 @@ def make_fixture(directory):
     write(directory, "deployments.json", {"items": [{
         "metadata": {"name": "inventory"},
         "spec": {"replicas": 1, "template": {
-            "metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": "2026-10-08T11:55:00Z"}},
+            "metadata": {"labels": {"app": "inventory"},
+                         "annotations": {"kubectl.kubernetes.io/restartedAt": "2026-10-08T11:55:00Z"}},
             "spec": {"containers": [{"name": "inventory", "image": "incidentpilot/shop:dev",
                                       "resources": {"limits": {"memory": "96Mi"}},
+                                      "livenessProbe": {"httpGet": {"path": "/health", "port": "http"}, "periodSeconds": 10},
                                       "envFrom": [{"configMapRef": {"name": "inventory-config"}}]}]}}},
         "status": {"readyReplicas": 1, "updatedReplicas": 1, "unavailableReplicas": 1,
                    "conditions": [{"type": "Progressing", "status": "True", "reason": "ReplicaSetUpdated", "message": "rollout in progress"}]},
@@ -59,6 +61,9 @@ def make_fixture(directory):
     write(directory, "configmaps.json", {"items": [{
         "metadata": {"name": "inventory-config", "managedFields": [{"time": "2026-10-08T11:55:00Z"}]},
         "data": {"SERVICE_NAME": "inventroy"}}]})
+    write(directory, "networkpolicies.json", {"items": [{
+        "metadata": {"name": "inventory-lockdown", "creationTimestamp": "2026-10-08T11:57:00Z"},
+        "spec": {"podSelector": {"matchLabels": {"app": "inventory"}}, "policyTypes": ["Ingress"]}}]})
     os.makedirs(os.path.join(directory, "logs"))
     with open(os.path.join(directory, "logs", "inventory-new-1.previous.log"), "w") as f:
         f.write(json.dumps({"ts": "2026-10-08T11:59:00", "level": "fatal", "service": "?",
@@ -92,6 +97,17 @@ class KubeToolsTest(unittest.TestCase):
         self.assertIn("replicaset revision 2: replicas 1, ready 0", out)
         self.assertIn("config from ['inventory-config']", out)
         self.assertLess(out.index("revision 2"), out.index("revision 1"))
+
+    def test_describe_shows_probes_and_network_policies(self):
+        out = tools.describe_workload(self.b, "inventory")
+        self.assertIn("livenessProbe: HTTP GET /health port http, every 10s", out)
+        self.assertIn("network policy inventory-lockdown selects these pods (created 3m ago): "
+                      "Ingress: all traffic denied", out)
+
+    def test_policy_selecting_other_pods_is_not_shown(self):
+        self.assertTrue(tools._selects({"spec": {"podSelector": {}}}, {"app": "orders"}))
+        self.assertFalse(tools._selects({"spec": {"podSelector": {"matchLabels": {"app": "inventory"}}}},
+                                        {"app": "orders"}))
 
     def test_describe_unknown_and_bad_name(self):
         self.assertIn("Existing: inventory", tools.describe_workload(self.b, "payments"))

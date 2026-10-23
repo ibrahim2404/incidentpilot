@@ -1,8 +1,10 @@
 id: S005
 title: Gateway request validation saturates its CPU limit and latency climbs
+difficulty: L1
 ground_truth:
   component: gateway
   fault: cpu_saturation
+  expected_remediation: rollback_config
   summary: >
     gateway-config REQUEST_VALIDATION_ROUNDS was raised from 1000 to 400000. Each
     request now burns about 0.25 s of CPU; against a 200m limit the container is

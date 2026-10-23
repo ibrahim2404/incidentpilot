@@ -1,8 +1,10 @@
 id: S003
 title: Gateway config points at a non-existent orders host
+difficulty: L1
 ground_truth:
   component: gateway
   fault: bad_config
+  expected_remediation: rollback_config
   summary: >
     gateway-config UPSTREAM_URL was changed to orders.shop-prod.svc.cluster.local
     (wrong namespace). DNS resolution fails, gateway returns 503 on every request,

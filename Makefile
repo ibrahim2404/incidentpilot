@@ -32,6 +32,7 @@ build-k3s:
 deploy:
 	kubectl apply -f deploy/monitoring/
 	kubectl apply -f deploy/shop/
+	kubectl apply -f deploy/agent/reader-rbac.yaml
 	kubectl -n monitoring rollout restart deploy/prometheus
 	kubectl -n shop rollout restart deploy/gateway deploy/orders deploy/inventory
 	$(MAKE) wait
@@ -82,9 +83,15 @@ replay-tools:
 record:
 	$(PY) scenarios/runner.py run $(ID) --record
 
-# Record every scenario (one after the other; each waits for the cluster to be healthy first)
+# Record every scenario (or IDS="S006 S007"), one after the other. A scenario whose alert does
+# not fire is reverted, logged in golden/failures.log, and the loop moves on.
+IDS ?= $(shell $(PY) scenarios/runner.py list | cut -d' ' -f1)
 golden:
-	for s in $$($(PY) scenarios/runner.py list | cut -d' ' -f1); do $(PY) scenarios/runner.py run $$s --record || exit 1; done
+	mkdir -p golden
+	for s in $(IDS); do \
+	  $(PY) scenarios/runner.py run $$s --record || echo "$$(date -u +%FT%TZ) $$s failed" >> golden/failures.log; \
+	done
+	@echo "recorded: $$(ls -d golden/S* 2>/dev/null | wc -l) incidents"; cat golden/failures.log 2>/dev/null || true
 
 # Replay evaluation on golden/. make eval ARGS="--repeats 1 --only S002"
 eval:

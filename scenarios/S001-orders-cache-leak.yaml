@@ -1,9 +1,11 @@
 id: S001
 title: Orders response cache grows without eviction until OOMKilled
 # Ground truth is never shown to the agent. The agent only receives the alert payload.
+difficulty: L1
 ground_truth:
   component: orders
   fault: memory_leak
+  expected_remediation: rollback_config
   summary: >
     RESPONSE_CACHE_ENABLED=true in orders-config enables a per-request cache with no
     eviction. Memory climbs to the 96Mi limit, the container is OOMKilled and restarts.

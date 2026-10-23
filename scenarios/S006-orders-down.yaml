@@ -1,0 +1,21 @@
+id: S006
+title: Orders has zero replicas; gateway returns 5xx
+difficulty: L1
+ground_truth:
+  component: orders
+  fault: dependency_down
+  expected_remediation: scale_up
+  summary: >
+    The orders deployment was scaled to 0. The orders Service has no endpoints, gateway
+    gets connection refused and returns 503. inventory is healthy but receives no traffic.
+  evidence:
+    - orders deployment desired 0, ready 0
+    - gateway upstream_requests_total{upstream="orders",outcome="connection_refused"} rising
+    - inventory request rate falls to zero while its pod is Ready
+inject:
+  - [-n, shop, scale, deployment/orders, --replicas=0]
+expect_alerts: [HighErrorRate]
+timeout_s: 300
+revert:
+  - [-n, shop, scale, deployment/orders, --replicas=1]
+  - [-n, shop, rollout, status, deployment/orders, --timeout=120s]

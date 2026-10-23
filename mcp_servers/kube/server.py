@@ -33,8 +33,10 @@ def list_pods() -> str:
 @mcp.tool()
 def describe_workload(name: str) -> str:
     """Describe one deployment: desired vs ready replicas, rollout conditions, last restart,
-    container image, resource limits, the configmap it reads, and its recent revisions.
-    Use it to check a suspected service, e.g. a rollout stuck on a new revision or 0 replicas.
+    container image, resource limits, liveness/readiness probes, the configmap it reads, its recent
+    revisions, and any network policy that applies to its pods.
+    Use it to check a suspected service, e.g. a rollout stuck on a new revision, 0 replicas, a probe
+    that kills a healthy process, or traffic blocked by a policy.
     name is the deployment name, like "inventory"."""
     return tools.describe_workload(backend, name)
 

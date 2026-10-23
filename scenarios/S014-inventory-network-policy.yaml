@@ -1,0 +1,22 @@
+id: S014
+title: A NetworkPolicy silently drops all traffic to a healthy inventory
+difficulty: L3
+ground_truth:
+  component: inventory
+  fault: network_block
+  expected_remediation: remove_network_policy
+  summary: >
+    A NetworkPolicy selecting the inventory pods with no ingress rule was applied. inventory
+    is Running and Ready and logs nothing wrong, but packets to it are dropped: orders
+    times out, gateway returns 5xx, and Prometheus can no longer scrape inventory either.
+    Nothing changed in configmaps or deployments.
+  evidence:
+    - describe_workload inventory lists a network policy denying all ingress, created minutes ago
+    - orders upstream outcome timeout to inventory
+    - inventory metrics endpoint unreachable (up 0) while its pod is Ready
+inject:
+  - [apply, -f, scenarios/manifests/S014-inventory-netpol.yaml]
+expect_alerts: [HighErrorRate]
+timeout_s: 300
+revert:
+  - [-n, shop, delete, networkpolicy, inventory-ingress, --ignore-not-found]

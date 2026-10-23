@@ -1,0 +1,26 @@
+id: S009
+title: Inventory CPU saturation cascades into timeouts and 5xx upstream
+difficulty: L3
+ground_truth:
+  component: inventory
+  fault: cpu_saturation
+  expected_remediation: rollback_config
+  summary: >
+    inventory-config REQUEST_VALIDATION_ROUNDS was raised from 1000 to 400000. inventory
+    is throttled at its CPU limit, its latency grows past orders' 2 s timeout, and orders
+    and gateway return 5xx. The symptom is seen on all three services; the cause is the
+    leaf service.
+  evidence:
+    - inventory CPU at its 0.2 core limit, high share of throttled CPU periods
+    - inventory p95 latency far above normal
+    - orders upstream outcome timeout to inventory; gateway errors follow
+    - inventory-config REQUEST_VALIDATION_ROUNDS changed minutes before the alert
+inject:
+  - [-n, shop, patch, configmap, inventory-config, --type, merge, -p, '{"data":{"REQUEST_VALIDATION_ROUNDS":"400000"}}']
+  - [-n, shop, rollout, restart, deployment/inventory]
+expect_alerts: [HighLatency]
+timeout_s: 360
+revert:
+  - [-n, shop, patch, configmap, inventory-config, --type, merge, -p, '{"data":{"REQUEST_VALIDATION_ROUNDS":"1000"}}']
+  - [-n, shop, rollout, restart, deployment/inventory]
+  - [-n, shop, rollout, status, deployment/inventory, --timeout=120s]

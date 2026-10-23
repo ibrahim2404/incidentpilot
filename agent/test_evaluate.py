@@ -11,7 +11,7 @@ def run(incident, repeat, correct, fault="crash_loop", difficulty="L1", stop="su
     return {"incident": incident, "repeat": repeat, "difficulty": difficulty, "stop_reason": stop,
             "diagnosis": {"component": "inventory", "fault": fault} if stop == "submitted" else None,
             "ground_truth": {"component": "inventory", "fault": fault},
-            "score": {"correct": correct, "component_ok": correct, "fault_ok": correct},
+            "score": {"correct": correct, "component_ok": correct, "fault_ok": correct, "action_ok": correct},
             "tool_calls": [{}] * 4, "prompt_tokens": 1000, "completion_tokens": 100, "seconds": 10.0}
 
 
@@ -30,6 +30,7 @@ class EvalTest(unittest.TestCase):
         self.assertEqual(s["by_difficulty"]["L2"], {"correct": 1, "runs": 2, "accuracy": 0.5})
         self.assertEqual(s["accuracy_std_across_repeats"], 0.25)
         self.assertEqual(s["no_diagnosis"], 1)
+        self.assertEqual(s["remediation_accuracy"], 0.75)
         self.assertIn("- B r2: said -/-, truth inventory/crash_loop (max_steps)", markdown(s, "m", runs))
 
 

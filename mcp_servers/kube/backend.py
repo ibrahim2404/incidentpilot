@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from typing import Protocol
 
-KINDS = {"pods", "deployments", "replicasets", "events", "configmaps", "services", "endpoints"}
+KINDS = {"pods", "deployments", "replicasets", "events", "configmaps", "services", "endpoints", "networkpolicies"}
 
 
 class KubeError(Exception):

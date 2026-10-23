@@ -1,0 +1,24 @@
+id: S015
+title: Request rate jumps far above normal with no change to any service
+difficulty: L2
+ground_truth:
+  component: gateway
+  also_accept_component: [orders, inventory]
+  fault: traffic_surge
+  expected_remediation: scale_up
+  summary: >
+    The client load grew about 30x (loadgen scaled from 1 to 30 replicas). Every service
+    runs into its CPU limit and latency climbs. No configmap, image or limit changed.
+    The fix is capacity, not a rollback. Any of the three services is accepted as the
+    component since all saturate; the fault label is what matters.
+  evidence:
+    - gateway requests per second many times higher than in the previous hour
+    - CPU at the limit and throttling on the services
+    - no recent configmap or deployment change
+inject:
+  - [-n, shop, scale, deployment/loadgen, --replicas=30]
+expect_alerts: [HighLatency]
+timeout_s: 420
+revert:
+  - [-n, shop, scale, deployment/loadgen, --replicas=1]
+  - [-n, shop, rollout, status, deployment/loadgen, --timeout=120s]

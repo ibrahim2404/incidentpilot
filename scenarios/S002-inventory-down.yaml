@@ -1,8 +1,10 @@
 id: S002
 title: Inventory has zero replicas; orders and gateway return 5xx
+difficulty: L1
 ground_truth:
   component: inventory
   fault: dependency_down
+  expected_remediation: scale_up
   summary: >
     The inventory deployment was scaled to 0. The inventory Service has no endpoints,
     so orders gets connection refused and returns 503; gateway propagates 502.

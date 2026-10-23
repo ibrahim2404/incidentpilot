@@ -24,8 +24,8 @@ import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-FAULTS = {"memory_leak", "crash_loop", "bad_config", "dependency_down", "cpu_saturation"}
-COMPONENTS = {"gateway", "orders", "inventory"}
+sys.path.insert(0, os.path.join(ROOT, "agent"))
+from taxonomy import ACTIONS, COMPONENTS, DIFFICULTIES, FAULTS  # noqa: E402  single source of truth
 PROM_PROXY = "/api/v1/namespaces/monitoring/services/prometheus:9090/proxy"
 
 
@@ -46,12 +46,23 @@ def validate(s):
             errs.append(f"missing {key}")
     gt = s.get("ground_truth", {})
     if gt.get("component") not in COMPONENTS:
-        errs.append(f"ground_truth.component must be one of {sorted(COMPONENTS)}")
-    if gt.get("fault") not in FAULTS:
-        errs.append(f"ground_truth.fault must be one of {sorted(FAULTS)}")
+        errs.append(f"ground_truth.component must be one of {COMPONENTS}")
+    if gt.get("fault") not in FAULTS or gt.get("fault") == "none":
+        errs.append(f"ground_truth.fault must be one of {[f for f in FAULTS if f != 'none']}")
     for extra in gt.get("also_accept", []):
         if extra not in FAULTS:
             errs.append(f"ground_truth.also_accept: {extra!r} is not a known fault")
+    for extra in gt.get("also_accept_component", []):
+        if extra not in COMPONENTS:
+            errs.append(f"ground_truth.also_accept_component: {extra!r} is not a known component")
+    remediation = gt.get("expected_remediation")
+    if not remediation:
+        errs.append("ground_truth.expected_remediation is required (one action or a list)")
+    for action in [remediation] if isinstance(remediation, str) else (remediation or []):
+        if action not in ACTIONS:
+            errs.append(f"ground_truth.expected_remediation: {action!r} is not a known action")
+    if s.get("difficulty") not in DIFFICULTIES:
+        errs.append(f"difficulty must be one of {DIFFICULTIES}")
     for step in s.get("inject", []) + s.get("revert", []):
         if not isinstance(step, list) or not all(isinstance(a, str) for a in step):
             errs.append(f"step must be a list of strings: {step!r}")
@@ -63,7 +74,7 @@ def validate(s):
 def kubectl(args, capture=False, check=True):
     cmd = ["kubectl", *args]
     print("+ " + " ".join(cmd), file=sys.stderr)
-    r = subprocess.run(cmd, capture_output=capture, text=True)
+    r = subprocess.run(cmd, capture_output=capture, text=True, cwd=ROOT)  # manifest paths are repo-relative
     if check and r.returncode != 0:
         raise SystemExit(f"command failed ({r.returncode}): {' '.join(cmd)}\n{r.stderr or ''}")
     return r.stdout if capture else None

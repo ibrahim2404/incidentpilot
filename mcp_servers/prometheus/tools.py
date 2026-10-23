@@ -19,8 +19,12 @@ OVERVIEW = {
     "share of 5xx responses": 'sum(rate(http_requests_total{{service="{s}",code=~"5.."}}[2m])) / sum(rate(http_requests_total{{service="{s}"}}[2m]))',
     "p95 latency (seconds)": 'histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{{service="{s}"}}[2m])))',
     "calls to upstream by outcome (per second)": 'sum by (upstream, outcome) (rate(upstream_requests_total{{service="{s}"}}[2m]))',
-    "CPU used (cores, limit is 0.2)": 'sum(rate(container_cpu_usage_seconds_total{{namespace="shop",container="{s}"}}[2m]))',
-    "memory used (MiB, limit is 96)": 'sum(container_memory_working_set_bytes{{namespace="shop",container="{s}"}}) / 1024 / 1024',
+    "metrics endpoint reachable by pod (1 = yes)": 'max by (pod) (up{{job="pods",namespace="shop",pod=~"{s}-.*"}})',
+    "CPU used (cores)": 'sum(rate(container_cpu_usage_seconds_total{{namespace="shop",container="{s}"}}[2m]))',
+    "CPU limit by pod (cores)": 'max by (pod) (kube_pod_container_resource_limits{{namespace="shop",container="{s}",resource="cpu"}})',
+    "share of CPU periods throttled": 'sum(rate(container_cpu_cfs_throttled_periods_total{{namespace="shop",container="{s}"}}[2m])) / sum(rate(container_cpu_cfs_periods_total{{namespace="shop",container="{s}"}}[2m]))',
+    "memory used (MiB)": 'sum(container_memory_working_set_bytes{{namespace="shop",container="{s}"}}) / 1024 / 1024',
+    "memory limit by pod (MiB)": 'max by (pod) (kube_pod_container_resource_limits{{namespace="shop",container="{s}",resource="memory"}}) / 1024 / 1024',
     "container restarts in the last 15 min": 'sum(increase(kube_pod_container_status_restarts_total{{namespace="shop",container="{s}"}}[15m]))',
     "last termination reason": 'kube_pod_container_status_last_terminated_reason{{namespace="shop",container="{s}"}} == 1',
     "ready replicas": 'kube_deployment_status_replicas_ready{{namespace="shop",deployment="{s}"}}',
@@ -70,6 +74,9 @@ def service_overview(backend: Backend, service: str) -> str:
         elif title == "last termination reason":
             reasons = sorted({s["metric"].get("reason", "?") for s in result})
             lines.append(f"- {title}: {', '.join(reasons)}")
+        elif "by pod" in title:  # during a rollout old and new pods can differ: show each
+            parts = [f"{s['metric'].get('pod', '?')} {render.number(s['value'][1])}" for s in result]
+            lines.append(f"- {title}: {'; '.join(sorted(parts))}")
         elif title.startswith("calls to upstream"):
             parts = [f"{s['metric'].get('upstream')}/{s['metric'].get('outcome')} {render.number(s['value'][1])}" for s in result]
             lines.append(f"- {title}: {'; '.join(parts)}")

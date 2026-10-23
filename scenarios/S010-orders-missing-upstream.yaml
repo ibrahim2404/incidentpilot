@@ -1,0 +1,25 @@
+id: S010
+title: Orders rollout crash-loops because a required setting was emptied
+difficulty: L1
+ground_truth:
+  component: orders
+  fault: crash_loop
+  also_accept: [bad_config]
+  expected_remediation: rollback_config
+  summary: >
+    orders-config UPSTREAM_URL was set to an empty string. The new orders pod exits at
+    start with "UPSTREAM_URL is required" and enters CrashLoopBackOff. The old pod keeps
+    serving, so users see no errors yet.
+  evidence:
+    - new orders pod in CrashLoopBackOff, previous logs show "invalid configuration"
+    - orders-config UPSTREAM_URL empty, changed minutes before the alert
+    - orders rollout stuck with the old ReplicaSet still serving
+inject:
+  - [-n, shop, patch, configmap, orders-config, --type, merge, -p, '{"data":{"UPSTREAM_URL":""}}']
+  - [-n, shop, rollout, restart, deployment/orders]
+expect_alerts: [ContainerRestarting]
+timeout_s: 300
+revert:
+  - [-n, shop, patch, configmap, orders-config, --type, merge, -p, '{"data":{"UPSTREAM_URL":"http://inventory.shop.svc.cluster.local:8080"}}']
+  - [-n, shop, rollout, restart, deployment/orders]
+  - [-n, shop, rollout, status, deployment/orders, --timeout=120s]

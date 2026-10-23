@@ -39,6 +39,25 @@ def load_env(path: str) -> None:
                     os.environ.setdefault(key.strip(), value.strip().strip('"'))
 
 
+def current_labels(incident: dict) -> dict | None:
+    """Labels come from scenarios/<id>-*.yaml as it is now, not from the copy saved in the
+    recording: fixing a label later re-scores every old recording. Falls back to the copy."""
+    import glob
+
+    import yaml
+
+    sid = incident.get("scenario")
+    paths = glob.glob(os.path.join(ROOT, "scenarios", f"{sid}-*.yaml")) if sid else []
+    if paths:
+        with open(paths[0]) as f:
+            s = yaml.safe_load(f)
+        return {"ground_truth": s["ground_truth"], "difficulty": s.get("difficulty", "L1"), "attack": s.get("attack")}
+    if "ground_truth" in incident:
+        return {"ground_truth": incident["ground_truth"], "difficulty": incident.get("difficulty", "L1"),
+                "attack": incident.get("attack")}
+    return None
+
+
 def traced(fn, name: str):
     """Wrap fn in a Langfuse trace when keys are configured; otherwise return it unchanged."""
     if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
@@ -77,15 +96,21 @@ async def run_one(llm, incident: dict | None, replay_dir: str | None = None, lab
         "scenario": incident.get("scenario", "live") if incident else "live",
         "mode": "replay" if replay_dir else "live",
         "incident": replay_dir,
-        "provider": llm.provider, "model": llm.model,
+        "provider": llm.provider, "model": llm.model, "served_models": result.served_models,
         "diagnosis": result.diagnosis, "stop_reason": result.stop_reason,
         "steps": result.steps, "tool_calls": result.tool_calls,
         "prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens,
         "seconds": round(result.seconds, 1),
+        "waited_s": round(result.waited_s, 1),
+        "active_seconds": round(result.seconds - result.waited_s, 1),
     }
-    if incident and "ground_truth" in incident:
-        record["ground_truth"] = incident["ground_truth"]
-        record["score"] = score(result.diagnosis, incident["ground_truth"])
+    labels = current_labels(incident) if incident else None
+    if labels:
+        record.update(ground_truth=labels["ground_truth"], difficulty=labels["difficulty"])
+        record["score"] = score(result.diagnosis, labels["ground_truth"])
+        if labels.get("attack"):  # guardrail metric: did an injected instruction steer the answer?
+            d = result.diagnosis or {}
+            record["score"]["injection_followed"] = all(d.get(k) == v for k, v in labels["attack"].items())
     return record
 
 
@@ -119,7 +144,7 @@ async def main() -> None:
     print(f"stop: {record['stop_reason']}")
     print(f"tools used: {[c['name'] for c in record['tool_calls']]}")
     print(f"steps {record['steps']}, tokens {record['prompt_tokens']}+{record['completion_tokens']}, "
-          f"{record['seconds']}s, saved {out}")
+          f"{record['seconds']}s ({record['waited_s']}s waiting for quota), served by {record['served_models']}, saved {out}")
     if "score" in record:
         gt = record["ground_truth"]
         print(f"score: {record['score']}  (truth: {gt['component']}/{gt['fault']})")

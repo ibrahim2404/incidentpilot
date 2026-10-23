@@ -1,8 +1,10 @@
 id: S004
 title: Inventory rollout crash-loops on a typo in its service name
+difficulty: L1
 ground_truth:
   component: inventory
   fault: crash_loop
+  expected_remediation: rollback_config
   also_accept: [bad_config]
   summary: >
     inventory-config SERVICE_NAME was changed to "inventroy". The new inventory pod

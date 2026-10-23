@@ -29,6 +29,8 @@ class Result:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     seconds: float = 0.0
+    waited_s: float = 0.0          # quota pacing / backoff inside seconds
+    served_models: list[str] = field(default_factory=list)
     stop_reason: str = ""
 
 
@@ -60,6 +62,9 @@ async def investigate(alert_text: str, tools: list[dict], llm: LLM, call_tool: T
             result.stop_reason = f"llm_error: {type(e).__name__}: {str(e)[:300]}"
             result.seconds = time.monotonic() - started
             return result
+        result.waited_s += reply.get("waited_s", 0.0)
+        if reply.get("model") and reply["model"] not in result.served_models:
+            result.served_models.append(reply["model"])
         usage = reply.get("usage") or {}
         result.prompt_tokens += usage.get("prompt_tokens", 0)
         result.completion_tokens += usage.get("completion_tokens", 0)
@@ -104,9 +109,14 @@ async def investigate(alert_text: str, tools: list[dict], llm: LLM, call_tool: T
 
 
 def score(diagnosis: dict | None, truth: dict) -> dict:
-    """Exact match on component + fault (also_accept lists other acceptable fault labels)."""
+    """Root cause = exact component AND fault (also_accept / also_accept_component list other labels
+    a careful engineer could defend). The proposed remediation is scored separately."""
     if not diagnosis:
-        return {"component_ok": False, "fault_ok": False, "correct": False}
-    component_ok = diagnosis.get("component") == truth["component"]
+        return {"component_ok": False, "fault_ok": False, "correct": False, "action_ok": False}
+    component_ok = diagnosis.get("component") in [truth["component"], *truth.get("also_accept_component", [])]
     fault_ok = diagnosis.get("fault") in [truth["fault"], *truth.get("also_accept", [])]
-    return {"component_ok": component_ok, "fault_ok": fault_ok, "correct": component_ok and fault_ok}
+    expected = truth.get("expected_remediation")
+    expected = [expected] if isinstance(expected, str) else (expected or [])
+    action_ok = diagnosis.get("proposed_action") in expected if expected else None
+    return {"component_ok": component_ok, "fault_ok": fault_ok, "correct": component_ok and fault_ok,
+            "action_ok": action_ok}

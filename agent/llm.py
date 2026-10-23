@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import time
 
 PROVIDERS = {
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-               "key_env": "GEMINI_API_KEY", "default_model": "gemini-3.5-flash"},
+               "key_env": "GEMINI_API_KEY", "default_model": "gemini-3.5-flash", "rpm": 5},
     "groq": {"base_url": "https://api.groq.com/openai/v1",
-             "key_env": "GROQ_API_KEY", "default_model": "openai/gpt-oss-120b"},
+             "key_env": "GROQ_API_KEY", "default_model": "openai/gpt-oss-120b", "rpm": 30},
 }
 
 
@@ -31,6 +33,12 @@ def is_transient(e: Exception) -> bool:
     if isinstance(e, (APIConnectionError, APITimeoutError)):
         return True
     return isinstance(e, APIStatusError) and (e.status_code == 429 or e.status_code >= 500)
+
+
+def retry_hint_s(e: Exception) -> float:
+    """Gemini says 'Please retry in 3.13s' in 429 bodies; honour it when present."""
+    m = re.search(r"retry in ([0-9.]+)s", str(e))
+    return float(m.group(1)) + 1 if m else 0.0
 
 
 def provider_extra(tool_call) -> dict:
@@ -61,9 +69,21 @@ class ChatLLM:
             raise SystemExit(f"{cfg['key_env']} is not set (see .env.example)")
         self.model = model or os.environ.get("LLM_MODEL", cfg["default_model"])
         self.client = _client_class()(base_url=cfg["base_url"], api_key=key, max_retries=0)
+        # Pace requests under the free-tier requests-per-minute quota instead of hitting 429s.
+        self.min_interval_s = 60.0 / float(os.environ.get("LLM_RPM", cfg["rpm"]))
+        self._last_start = 0.0
+
+    async def _pace(self) -> float:
+        wait = self._last_start + self.min_interval_s - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        self._last_start = time.monotonic()
+        return max(wait, 0.0)
 
     async def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
+        waited = 0.0  # time spent pacing or backing off: quota, not agent latency
         for attempt in range(len(BACKOFF_S) + 1):
+            waited += await self._pace()
             try:
                 resp = await self.client.chat.completions.create(
                     model=self.model, messages=messages, tools=tools, tool_choice="auto", temperature=0)
@@ -71,10 +91,14 @@ class ChatLLM:
             except Exception as e:
                 if not is_transient(e) or attempt == len(BACKOFF_S):
                     raise
-                await asyncio.sleep(BACKOFF_S[attempt])
+                delay = max(BACKOFF_S[attempt], retry_hint_s(e))
+                waited += delay
+                await asyncio.sleep(delay)
         msg = resp.choices[0].message
         usage = resp.usage
         return {
+            "model": getattr(resp, "model", None),  # the model that answered (aliases get redirected)
+            "waited_s": round(waited, 1),
             "content": msg.content,
             "extra": provider_extra(msg),  # message-level provider fields, echoed back the same way
             "tool_calls": [{"id": c.id, "name": c.function.name, "arguments": c.function.arguments,

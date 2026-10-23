@@ -1,0 +1,23 @@
+id: S013
+title: Orders memory limit lowered below what the process needs to start
+difficulty: L2
+ground_truth:
+  component: orders
+  fault: resource_limit
+  expected_remediation: [rollback_deployment, raise_memory_limit]
+  summary: >
+    The orders deployment memory limit (and request) was lowered from 96Mi to 10Mi. The
+    process needs about 20 MiB, so the new container is OOMKilled at start and restarts in
+    a loop. The old pod keeps serving. Trap: OOMKilled suggests a memory leak, but memory
+    never grows over time, the limit changed, and no config changed.
+  evidence:
+    - orders new pod last termination OOMKilled right after start
+    - memory limit by pod shows 10 MiB on the new pod and 96 MiB on the old one
+    - describe_workload shows limits memory 10Mi on a new revision
+inject:
+  - [-n, shop, set, resources, deployment/orders, -c, orders, --requests=memory=10Mi, --limits=memory=10Mi]
+expect_alerts: [ContainerRestarting]
+timeout_s: 300
+revert:
+  - [-n, shop, set, resources, deployment/orders, -c, orders, --requests=memory=32Mi, --limits=memory=96Mi]
+  - [-n, shop, rollout, status, deployment/orders, --timeout=120s]

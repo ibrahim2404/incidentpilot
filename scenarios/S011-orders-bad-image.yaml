@@ -1,0 +1,22 @@
+id: S011
+title: Orders rollout points at an image tag that does not exist
+difficulty: L2
+ground_truth:
+  component: orders
+  fault: bad_image
+  expected_remediation: rollback_deployment
+  summary: >
+    The orders deployment image was changed to incidentpilot/shop:2.0, which exists in no
+    registry. The new pod stays in ErrImagePull / ImagePullBackOff, the rollout never
+    completes, and the old pod keeps serving. No configmap changed.
+  evidence:
+    - new orders pod waiting with ErrImagePull or ImagePullBackOff
+    - describe_workload shows image incidentpilot/shop:2.0 and a new revision with 0 ready
+    - events "Failed to pull image"
+inject:
+  - [-n, shop, set, image, deployment/orders, orders=incidentpilot/shop:2.0]
+expect_alerts: [ContainerWaiting]
+timeout_s: 420
+revert:
+  - [-n, shop, set, image, deployment/orders, orders=incidentpilot/shop:dev]
+  - [-n, shop, rollout, status, deployment/orders, --timeout=120s]

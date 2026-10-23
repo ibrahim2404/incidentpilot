@@ -1,0 +1,23 @@
+id: S012
+title: Inventory liveness probe checks a path that does not exist
+difficulty: L2
+ground_truth:
+  component: inventory
+  fault: probe_misconfig
+  expected_remediation: rollback_deployment
+  summary: >
+    The inventory liveness probe path was changed from /healthz to /health. The process is
+    healthy and serves traffic, but every probe gets 404, so the kubelet kills the
+    container about every 30 s. Requests fail while it restarts. Trap: restarts look like
+    a crash loop, but the logs show clean starts and no fatal error.
+  evidence:
+    - 'events "Liveness probe failed: HTTP probe failed with statuscode: 404"'
+    - describe_workload shows livenessProbe HTTP GET /health
+    - inventory restarts rising, last termination reason Error/Completed without OOM or fatal logs
+inject:
+  - [-n, shop, patch, deployment, inventory, --type, json, -p, '[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/health"}]']
+expect_alerts: [ContainerRestarting]
+timeout_s: 360
+revert:
+  - [-n, shop, patch, deployment, inventory, --type, json, -p, '[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/healthz"}]']
+  - [-n, shop, rollout, status, deployment/inventory, --timeout=120s]
