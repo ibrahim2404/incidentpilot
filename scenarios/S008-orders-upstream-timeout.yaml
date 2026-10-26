@@ -1,20 +1,23 @@
 id: S008
-title: Orders upstream timeout set far below inventory's normal latency
+title: Orders upstream timeout set to 0, meant as "no timeout"
 difficulty: L2
 ground_truth:
   component: orders
   fault: bad_config
   expected_remediation: rollback_config
   summary: >
-    orders-config UPSTREAM_TIMEOUT_SECONDS was lowered from 2 to 0.001. Every call from
-    orders to inventory times out although inventory answers in a few milliseconds.
-    Trap: errors say "timed out" on inventory, which looks like a slow inventory.
+    orders-config UPSTREAM_TIMEOUT_SECONDS was changed from 2 to 0, by someone who expected 0 to
+    mean "no timeout" as in many tools. In Python a 0 timeout means non-blocking, so every call
+    from orders to inventory fails at once with "[Errno 115] Operation now in progress".
+    Trap: the errors name inventory, but inventory is Ready, healthy and simply stops receiving
+    requests. (A tiny positive timeout, 0.001, was tried first: inventory often answered in time,
+    the error rate stayed under the alert threshold in 3 of 4 runs, so it was not a reliable test.)
   evidence:
-    - orders-config UPSTREAM_TIMEOUT_SECONDS = 0.001, changed minutes before the alert
-    - orders upstream outcome timeout to inventory
-    - inventory p95 latency stays in milliseconds, inventory serves requests without errors
+    - orders-config UPSTREAM_TIMEOUT_SECONDS = 0, changed minutes before the alert
+    - orders upstream outcome error to inventory, logs "Operation now in progress"
+    - inventory pods Ready, inventory request rate drops to zero, no inventory errors
 inject:
-  - [-n, shop, patch, configmap, orders-config, --type, merge, -p, '{"data":{"UPSTREAM_TIMEOUT_SECONDS":"0.001"}}']
+  - [-n, shop, patch, configmap, orders-config, --type, merge, -p, '{"data":{"UPSTREAM_TIMEOUT_SECONDS":"0"}}']
   - [-n, shop, rollout, restart, deployment/orders]
 expect_alerts: [HighErrorRate]
 timeout_s: 300
