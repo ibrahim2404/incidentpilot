@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Writes .kube/reader.yaml: a kubeconfig that authenticates as the read-only
-# incidentpilot-reader ServiceAccount instead of the cluster admin.
+# Writes a kubeconfig that authenticates as one of the agent's ServiceAccounts instead of the admin.
+#   bash scripts/reader-kubeconfig.sh .kube/reader.yaml                         (read-only, MCP tools)
+#   bash scripts/reader-kubeconfig.sh .kube/remediator.yaml incidentpilot-remediator deploy/agent/remediator-rbac.yaml
 set -euo pipefail
 
 OUT="${1:-.kube/reader.yaml}"
+SA="${2:-incidentpilot-reader}"
+RBAC="${3:-deploy/agent/reader-rbac.yaml}"
 mkdir -p "$(dirname "$OUT")"
 
-kubectl apply -f deploy/agent/reader-rbac.yaml >/dev/null
+kubectl apply -f "$RBAC" >/dev/null
 for _ in $(seq 1 20); do
-  TOKEN=$(kubectl -n shop get secret incidentpilot-reader-token -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)
+  TOKEN=$(kubectl -n shop get secret "$SA-token" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)
   [ -n "$TOKEN" ] && break
   sleep 1
 done
@@ -24,12 +27,12 @@ clusters:
   - name: incidentpilot
     cluster: {server: "$SERVER", certificate-authority-data: "$CA"}
 users:
-  - name: incidentpilot-reader
+  - name: $SA
     user: {token: "$TOKEN"}
 contexts:
-  - name: reader
-    context: {cluster: incidentpilot, user: incidentpilot-reader, namespace: shop}
-current-context: reader
+  - name: $SA
+    context: {cluster: incidentpilot, user: $SA, namespace: shop}
+current-context: $SA
 EOF
 chmod 600 "$OUT"
 echo "wrote $OUT"

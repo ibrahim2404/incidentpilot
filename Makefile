@@ -2,7 +2,7 @@ CLUSTER ?= incidentpilot
 IMAGE   ?= incidentpilot/shop:dev
 PY      ?= python3
 
-.PHONY: help up build build-k3s deploy wait test scenario prom alerts down reader-kubeconfig incident replay-tools record golden eval
+.PHONY: help up build build-k3s deploy wait test scenario prom alerts down reader-kubeconfig remediator-kubeconfig incident mitigate kill unkill replay-tools record golden eval
 
 help:
 	@echo "make up        create the k3d cluster"
@@ -52,6 +52,16 @@ test:
 reader-kubeconfig:
 	bash scripts/reader-kubeconfig.sh .kube/reader.yaml
 
+# Write identity for agent/remediate.py only (see deploy/agent/remediator-rbac.yaml)
+remediator-kubeconfig:
+	bash scripts/reader-kubeconfig.sh .kube/remediator.yaml incidentpilot-remediator deploy/agent/remediator-rbac.yaml
+
+# Kill switch for remediation (fail closed: anything but "enabled" blocks every write)
+kill:
+	kubectl -n shop patch configmap incidentpilot-control --type merge -p '{"data":{"remediation":"disabled"}}'
+unkill:
+	kubectl -n shop patch configmap incidentpilot-control --type merge -p '{"data":{"remediation":"enabled"}}'
+
 scenario:
 	$(PY) scenarios/runner.py run $(S)
 
@@ -96,3 +106,15 @@ golden:
 # Replay evaluation on golden/. make eval ARGS="--repeats 1 --only S002"
 eval:
 	$(PY) agent/evaluate.py $(ARGS)
+
+# Closed loop on the live cluster (needs the Prometheus port-forward, see README):
+# inject -> alert -> diagnose -> plan, dry run, human approval -> apply -> verify -> (rollback)
+# The scenario revert always runs at the end as a safety net (idempotent).
+# make mitigate ID=S002            interactive approval
+# make mitigate ID=S002 APPROVE=--approve   unattended (recorded as pre-approved in the audit)
+mitigate:
+	$(PY) scenarios/runner.py run $(ID) --keep
+	INC=$$(ls -t runs/$(ID)-*.json | head -1); \
+	  $(PY) agent/run.py --incident $$INC && \
+	  $(PY) agent/remediate.py --incident $$INC --result $$(ls -t results/$(ID)-*.json | head -1) $(APPROVE) || true
+	$(PY) scenarios/runner.py revert $(ID)

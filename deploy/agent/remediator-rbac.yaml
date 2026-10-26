@@ -1,0 +1,60 @@
+# Identity used ONLY by agent/remediate.py, after a human approved a plan.
+# Separate from the read-only reader: the model-facing MCP tools can never write.
+# Every rule is the minimum one allowlisted action needs, on named objects where Kubernetes allows it.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: incidentpilot-remediator, namespace: shop}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: incidentpilot-remediator, namespace: shop}
+rules:
+  # read what a plan needs (list/watch cannot be restricted by name in Kubernetes RBAC)
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+  # rollout restart / undo, set resources: only the three shop services (not loadgen, not others)
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [gateway, orders, inventory]
+    verbs: [patch, update]
+  - apiGroups: [apps]
+    resources: [deployments/scale]
+    resourceNames: [gateway, orders, inventory]
+    verbs: [get, patch, update]
+  # rollback_config: only the three service configmaps
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [gateway-config, orders-config, inventory-config]
+    verbs: [get, patch]
+  # kill switch: readable, never writable by the remediator itself
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [incidentpilot-control]
+    verbs: [get]
+  # remove_network_policy, and re-create it on rollback
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, delete, create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: incidentpilot-remediator, namespace: shop}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: incidentpilot-remediator}
+subjects: [{kind: ServiceAccount, name: incidentpilot-remediator, namespace: shop}]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: incidentpilot-remediator-token
+  namespace: shop
+  annotations: {kubernetes.io/service-account.name: incidentpilot-remediator}
+type: kubernetes.io/service-account-token
+---
+# Kill switch. Fail closed: if this configmap is missing or says anything else, nothing is applied.
+#   make kill    -> remediation: disabled      make unkill -> remediation: enabled
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: incidentpilot-control, namespace: shop}
+data:
+  remediation: disabled
