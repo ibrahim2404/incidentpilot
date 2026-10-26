@@ -17,8 +17,8 @@ ground_truth:
     - no recent configmap or deployment change
 inject:
   - [-n, shop, scale, deployment/loadgen, --replicas=30]
-expect_alerts: [HighLatency]
-timeout_s: 420
+expect_any: [HighLatency, HighErrorRate]
+timeout_s: 480
 revert:
   - [-n, shop, scale, deployment/loadgen, --replicas=1]
   - [-n, shop, rollout, status, deployment/loadgen, --timeout=120s]

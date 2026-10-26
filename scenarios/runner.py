@@ -41,9 +41,11 @@ def load_all():
 
 def validate(s):
     errs = []
-    for key in ("id", "title", "ground_truth", "inject", "expect_alerts", "timeout_s", "revert"):
+    for key in ("id", "title", "ground_truth", "inject", "timeout_s", "revert"):
         if key not in s:
             errs.append(f"missing {key}")
+    if ("expect_alerts" in s) == ("expect_any" in s):
+        errs.append("give exactly one of expect_alerts (all must fire) or expect_any (one is enough)")
     gt = s.get("ground_truth", {})
     if gt.get("component") not in COMPONENTS:
         errs.append(f"ground_truth.component must be one of {COMPONENTS}")
@@ -105,8 +107,14 @@ def cmd_run(s, keep=False, do_record=False):
     started = dt.datetime.now(dt.timezone.utc)
     for step in s["inject"]:
         kubectl(step)
-    expected = set(s["expect_alerts"])
-    ok = wait_for(lambda: expected <= names(), s["timeout_s"], f"alerts {sorted(expected)}")
+    # expect_alerts: every listed alert must fire. expect_any: one symptom is enough, for faults whose
+    # visible symptom depends on load (which alert fires is not the ground truth; the cause is).
+    if "expect_any" in s:
+        expected = set(s["expect_any"])
+        ok = wait_for(lambda: bool(expected & names()), s["timeout_s"], f"any of {sorted(expected)}")
+    else:
+        expected = set(s["expect_alerts"])
+        ok = wait_for(lambda: expected <= names(), s["timeout_s"], f"alerts {sorted(expected)}")
     alerts = firing_alerts()
     record = {
         "scenario": s["id"],

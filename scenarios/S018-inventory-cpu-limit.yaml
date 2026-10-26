@@ -6,9 +6,9 @@ ground_truth:
   fault: resource_limit
   expected_remediation: rollback_deployment
   summary: >
-    The inventory deployment CPU limit (and request) was lowered from 200m to 5m. The
-    workload did not change, but the container is throttled almost all the time, so its
-    latency climbs and orders starts timing out. Trap: it looks like CPU saturation, but
+    The inventory deployment CPU limit (and request) was lowered from 200m to 5m, just under
+    the ~5.6m inventory normally uses (measured). The workload did not change, but the
+    container is throttled almost all the time, requests queue, and orders starts timing out. Trap: it looks like CPU saturation, but
     usage is tiny and it is the limit that changed (new revision), not the config.
   evidence:
     - CPU limit by pod shows 0.005 cores on inventory
@@ -16,8 +16,8 @@ ground_truth:
     - describe_workload inventory shows limits cpu 5m on a new revision; no configmap change
 inject:
   - [-n, shop, set, resources, deployment/inventory, -c, inventory, --requests=cpu=5m, --limits=cpu=5m]
-expect_alerts: [HighLatency]
-timeout_s: 420
+expect_any: [HighLatency, HighErrorRate]
+timeout_s: 600
 revert:
   - [-n, shop, set, resources, deployment/inventory, -c, inventory, --requests=cpu=20m, --limits=cpu=200m]
   - [-n, shop, rollout, status, deployment/inventory, --timeout=120s]
