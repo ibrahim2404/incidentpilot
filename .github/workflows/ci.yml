@@ -1,10 +1,22 @@
 name: ci
 
+# Two jobs, from cheap to expensive:
+#   unit       every push/PR, ~2 min: app, MCP tools, agent loop, remediation guardrails, replay round trip
+#   live       every push/PR as "smoke", ~15 min: real kind cluster, 2 representative scenarios
+#              weekly + on demand as "full", up to 3 h: every scenario, a report even when some fail
+# Running all 17 live scenarios on each push (~2 h) would make every PR slow and flaky.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 2 * * 0"   # weekly (Sunday): a full run costs ~2 h of runner time
   workflow_dispatch:
+    inputs:
+      ids:
+        description: "Scenario ids for the full job (space separated, empty = all)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -20,17 +32,19 @@ jobs:
       - run: make replay-tools   # enables the replay and end-to-end MCP tests
       - run: make test
 
-  scenarios:
-    # Proves every scenario really produces its alert on a fresh cluster.
-    # The agent evaluation gate (milestone 4) will plug in here.
+  live:
+    # push / PR: smoke (one dependency failure + one crash loop) proves cluster, alert rules,
+    # runner and recorder end to end in ~15 min. Weekly / manual: every scenario, up to 3 h.
     needs: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 25 || 180 }}
+    env:
+      MODE: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'smoke' || 'full' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: pip install pyyaml
+      - run: pip install -r requirements.txt
       - uses: helm/kind-action@v1
         with:
           cluster_name: incidentpilot
@@ -43,14 +57,24 @@ jobs:
         run: |
           kubectl apply -f deploy/monitoring/
           kubectl apply -f deploy/shop/
+          kubectl apply -f deploy/agent/reader-rbac.yaml
           make wait
       - name: Warm up (let Prometheus collect a healthy baseline)
-        run: sleep 90 && python scenarios/runner.py alerts
+        run: sleep 90 && python scenarios/runner.py alerts > /dev/null
       - name: Run scenarios
+        env:
+          IDS: ${{ inputs.ids }}
         run: |
-          for s in $(python scenarios/runner.py list | cut -d' ' -f1); do
-            python scenarios/runner.py run "$s"
+          if [ "$MODE" = "smoke" ]; then IDS="S002 S004"; fi
+          [ -n "$IDS" ] || IDS=$(python scenarios/runner.py list | cut -d' ' -f1 | tr '\n' ' ')
+          failed=""
+          for s in $IDS; do
+            python scenarios/runner.py run "$s" --record || failed="$failed $s"
           done
+          echo "## Live scenarios ($MODE)" >> "$GITHUB_STEP_SUMMARY"
+          echo "ran: $IDS" >> "$GITHUB_STEP_SUMMARY"
+          echo "failed:${failed:- none}" >> "$GITHUB_STEP_SUMMARY"
+          [ -z "$failed" ] || { echo "failed:$failed"; exit 1; }
       - name: Cluster state on failure
         if: failure()
         run: |
@@ -59,5 +83,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: incidents
-          path: runs/
+          name: incidents-${{ env.MODE }}
+          path: |
+            runs/
+            golden/
+          retention-days: 7
