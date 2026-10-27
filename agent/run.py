@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
-from loop import investigate, score  # noqa: E402
+from loop import AGENT_VERSION, investigate, score  # noqa: E402
 from prompts import user_message  # noqa: E402
 from replay import Replay  # noqa: E402
 
@@ -97,7 +97,9 @@ async def run_one(llm, incident: dict | None, replay_dir: str | None = None, lab
         "mode": "replay" if replay_dir else "live",
         "incident": replay_dir,
         "provider": llm.provider, "model": llm.model, "served_models": result.served_models,
+        "agent_version": AGENT_VERSION,
         "diagnosis": result.diagnosis, "stop_reason": result.stop_reason,
+        "forced_submit": result.forced_submit, "duplicate_calls": result.duplicate_calls,
         "steps": result.steps, "tool_calls": result.tool_calls,
         "prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens,
         "seconds": round(result.seconds, 1),

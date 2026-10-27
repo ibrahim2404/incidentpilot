@@ -78,6 +78,8 @@ def summarize(runs: list[dict]) -> dict:
         "by_difficulty": group(lambda r: r.get("difficulty", "L1")),
         "by_fault": group(lambda r: r["ground_truth"]["fault"]),
         "no_diagnosis": sum(r["diagnosis"] is None for r in runs),
+        "forced_submits": sum(bool(r.get("forced_submit")) for r in runs),
+        "duplicate_calls": sum(r.get("duplicate_calls", 0) for r in runs),
         "llm_errors": sum(r["stop_reason"].startswith("llm_error") for r in runs),
         "avg_tool_calls": round(statistics.mean(len(r["tool_calls"]) for r in runs), 2) if runs else 0,
         "avg_prompt_tokens": round(statistics.mean(r["prompt_tokens"] for r in runs)) if runs else 0,
@@ -133,7 +135,10 @@ async def main() -> None:
     load_env(os.path.join(ROOT, ".env"))
 
     llm = ChatLLM(model=a.model)
-    out_dir = os.path.join(ROOT, "results", f"eval-{llm.model.replace('/', '_')}{'-' + a.tag if a.tag else ''}")
+    from loop import AGENT_VERSION
+    # one folder per (model, agent version): changing the agent can never mix old and new runs
+    out_dir = os.path.join(ROOT, "results",
+                           f"eval-{llm.model.replace('/', '_')}-v{AGENT_VERSION}{'-' + a.tag if a.tag else ''}")
     os.makedirs(out_dir, exist_ok=True)
     incidents = sorted(d for d in glob.glob(os.path.join(a.golden, "*")) if os.path.exists(os.path.join(d, "incident.json")))
     if a.only:

@@ -43,9 +43,13 @@ class FakeTools:
         return self.output
 
 
+TOOL_SPECS = [{"type": "function", "function": {"name": n, "description": "", "parameters": {"type": "object"}}}
+              for n in ("list_pods", "get_config", "get_logs", "service_overview")]
+
+
 def run(llm, tools=None, **kw):
     tools = tools or FakeTools()
-    return asyncio.run(investigate("Alerts firing: x", [], llm, tools, **kw)), tools
+    return asyncio.run(investigate("Alerts firing: x", TOOL_SPECS, llm, tools, **kw)), tools
 
 
 class LoopTest(unittest.TestCase):
@@ -94,12 +98,34 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(r.diagnosis, GOOD)
         self.assertEqual(llm.seen[1][0][-1]["role"], "user")
 
-    def test_step_budget(self):
-        llm = FakeLLM(*[[call("list_pods", {}, i)] for i in range(3)])
+    def test_step_budget_and_unoffered_tool_never_runs(self):
+        # a model that ignores the forced answer and keeps investigating on the last step
+        llm = FakeLLM(*[[call("list_pods", {"i": i}, i)] for i in range(3)])
         r, tools = run(llm, max_steps=3)
         self.assertIsNone(r.diagnosis)
         self.assertEqual(r.stop_reason, "max_steps")
-        self.assertEqual(len(tools.calls), 3)
+        self.assertEqual(len(tools.calls), 2)  # the 3rd call was not offered, so it was not executed
+
+    def test_last_step_offers_only_submit(self):
+        llm = FakeLLM(*[[call("list_pods", {"i": i}, i)] for i in range(2)], [call("submit_diagnosis", GOOD, 9)])
+        r, _ = run(llm, max_steps=3)
+        self.assertEqual(r.diagnosis, GOOD)
+        self.assertTrue(r.forced_submit)
+        self.assertEqual([t["function"]["name"] for t in llm.seen[2][1]], ["submit_diagnosis"])
+        self.assertIn("budget exhausted", llm.seen[2][0][-1]["content"])
+
+    def test_two_steps_left_warning(self):
+        llm = FakeLLM(*[[call("list_pods", {"i": i}, i)] for i in range(5)])
+        run(llm, max_steps=5)
+        self.assertIn("2 steps left", llm.seen[2][0][-1]["content"])
+
+    def test_duplicate_call_is_not_rerun(self):
+        llm = FakeLLM([call("get_config", {"name": "orders-config"}, 0)],
+                      [call("get_config", {"name": "orders-config"}, 1)], [call("submit_diagnosis", GOOD, 2)])
+        r, tools = run(llm)
+        self.assertEqual(len(tools.calls), 1)
+        self.assertEqual(r.duplicate_calls, 1)
+        self.assertIn("DUPLICATE", llm.seen[2][0][-1]["content"])
 
     def test_bad_json_arguments(self):
         broken = {"id": "c0", "name": "list_pods", "arguments": "{not json"}

@@ -17,6 +17,7 @@ from prompts import ACTIONS, COMPONENTS, FAULTS, SUBMIT_TOOL, SYSTEM
 LLM = Callable[[list[dict], list[dict]], Awaitable[dict]]
 ToolCaller = Callable[[str, dict], Awaitable[str]]
 
+AGENT_VERSION = "2"  # 1: free loop. 2: enforced step budget (forced answer on the last step) + duplicate-call guard
 MAX_STEPS = 12
 MAX_TOOL_CHARS = 2500  # keeps every request well under small context / per-request limits
 
@@ -29,6 +30,8 @@ class Result:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     seconds: float = 0.0
+    forced_submit: bool = False    # the budget ran out and only submit_diagnosis was offered
+    duplicate_calls: int = 0       # identical tool calls answered from the guard, not re-run
     waited_s: float = 0.0          # quota pacing / backoff inside seconds
     served_models: list[str] = field(default_factory=list)
     stop_reason: str = ""
@@ -53,11 +56,24 @@ async def investigate(alert_text: str, tools: list[dict], llm: LLM, call_tool: T
     messages: list[dict] = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": alert_text}]
     all_tools = tools + [SUBMIT_TOOL]
     result = Result(diagnosis=None)
+    seen: dict[str, int] = {}  # tool call (name + args) -> step it was first made
 
     for step in range(1, max_steps + 1):
         result.steps = step
+        remaining = max_steps - step
+        offered = all_tools
+        if remaining == 0:
+            # The budget is enforced in code, not only stated in the prompt: on the last step the only
+            # possible move is an answer, with whatever confidence the evidence supports.
+            offered = [SUBMIT_TOOL]
+            result.forced_submit = True
+            messages.append({"role": "user", "content": "Investigation budget exhausted: no more tools. Call "
+                             "submit_diagnosis now with the most likely root cause and an honest confidence."})
+        elif remaining == 2:
+            messages.append({"role": "user", "content": "2 steps left. Run only the check that would change "
+                             "your conclusion, then call submit_diagnosis."})
         try:
-            reply = await llm(messages, all_tools)
+            reply = await llm(messages, offered)
         except Exception as e:  # provider down, quota exhausted, bad model id: record it, don't crash an eval
             result.stop_reason = f"llm_error: {type(e).__name__}: {str(e)[:300]}"
             result.seconds = time.monotonic() - started
@@ -93,12 +109,23 @@ async def investigate(alert_text: str, tools: list[dict], llm: LLM, call_tool: T
                         result.seconds = time.monotonic() - started
                         return result
                     output = f"ERROR: {problem}. Call submit_diagnosis again."
+                elif c["name"] not in {t["function"]["name"] for t in offered}:
+                    # never run a tool the model was not offered at this step (e.g. after the budget ran out)
+                    output = f"ERROR: {c['name']} is not available now. Call submit_diagnosis."
                 else:
-                    t0 = time.monotonic()
-                    output = await call_tool(c["name"], args)
-                    result.tool_calls.append({"name": c["name"], "args": args,
-                                              "seconds": round(time.monotonic() - t0, 2),
-                                              "chars": len(output), "error": output.startswith("ERROR")})
+                    key = c["name"] + json.dumps(args, sort_keys=True)
+                    if key in seen:  # same call, same data: answering again only burns a round trip
+                        result.duplicate_calls += 1
+                        output = (f"DUPLICATE: you already called {c['name']} with these arguments at step "
+                                  f"{seen[key]}; the result has not changed. Use a different check, or call "
+                                  "submit_diagnosis.")
+                    else:
+                        seen[key] = step
+                        t0 = time.monotonic()
+                        output = await call_tool(c["name"], args)
+                        result.tool_calls.append({"name": c["name"], "args": args,
+                                                  "seconds": round(time.monotonic() - t0, 2),
+                                                  "chars": len(output), "error": output.startswith("ERROR")})
             if len(output) > MAX_TOOL_CHARS:
                 output = output[:MAX_TOOL_CHARS] + "\n[truncated: narrow the query]"
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": output})
