@@ -71,8 +71,18 @@ class Kubectl:
 class Step:
     args: list[str]
     stdin: str | None = None
+    restart_of: str | None = None  # a restart: its timestamp is set when the step runs (see restart())
+
+    def resolved(self) -> list[str]:
+        if self.restart_of:
+            stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": stamp}}}}}
+            return ["patch", "deployment", self.restart_of, "--type", "merge", "-p", json.dumps(body)]
+        return self.args
 
     def show(self) -> str:
+        if self.restart_of:
+            return f"kubectl -n shop patch deployment {self.restart_of} (restartedAt = time of execution)"
         return "kubectl -n shop " + " ".join(a if " " not in a and "{" not in a else repr(a) for a in self.args)
 
 
@@ -121,10 +131,10 @@ def container_view(template: dict) -> dict:
 
 def restart(svc: str) -> Step:
     """What `kubectl rollout restart` does, written as the patch it sends. rollout restart has no
-    --dry-run flag; a patch does, so the restart is validated by the API server like every other step."""
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": stamp}}}}}
-    return Step(["patch", "deployment", svc, "--type", "merge", "-p", json.dumps(body)])
+    --dry-run flag; a patch does, so the restart is validated by the API server like every other step.
+    The timestamp is taken when the step RUNS: Kubernetes restarts pods only when the annotation
+    changes, so an undo that reused the apply's timestamp would silently restart nothing."""
+    return Step([], restart_of=svc)
 
 
 def plan_rollback_config(k: Kubectl, svc: str) -> Plan:
@@ -259,7 +269,7 @@ def kill_switch_reason(k: Kubectl) -> str | None:
 
 def run_steps(k: Kubectl, steps: list[Step], dry_run: bool) -> None:
     for s in steps:
-        k.run(*s.args, *(["--dry-run=server"] if dry_run else []), stdin=s.stdin)
+        k.run(*s.resolved(), *(["--dry-run=server"] if dry_run else []), stdin=s.stdin)
 
 
 def firing(prom_url: str, names: set[str]) -> set[str] | None:

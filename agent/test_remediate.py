@@ -221,6 +221,17 @@ class RemediateTest(unittest.TestCase):
         self.assertEqual(dry[-1], "--dry-run=server")
         self.assertNotIn("rollout", sum(k.calls, []))  # `rollout restart` has no --dry-run flag
 
+    def test_undo_restart_gets_its_own_timestamp(self):
+        import time as _t
+        k = FakeKubectl({("configmap", "orders-config"): {"data": {"SERVICE_NAME": "orders",
+            "UPSTREAM_URL": "http://inventory.shop.svc.cluster.local:8081", "UPSTREAM_TIMEOUT_SECONDS": "2",
+            "RESPONSE_CACHE_ENABLED": "false", "RESPONSE_CACHE_ENTRY_KB": "256", "REQUEST_VALIDATION_ROUNDS": "1000"}}})
+        rec = self.go(k, diag("orders", "bad_config", "rollback_config"), verifier=lambda *_: (_t.sleep(0.01), ("still_firing", 1))[1])
+        self.assertEqual(rec["outcome"], "not_mitigated_rolled_back")
+        stamps = [c[-1] for c in k.writes() if c[:2] == ["patch", "deployment"]]
+        self.assertEqual(len(stamps), 2)
+        self.assertNotEqual(stamps[0], stamps[1])  # the rollback restart really restarts the pods
+
     def test_quantities(self):
         self.assertEqual(r.mebibytes("96Mi"), 96)
         self.assertEqual(r.mebibytes("1Gi"), 1024)
