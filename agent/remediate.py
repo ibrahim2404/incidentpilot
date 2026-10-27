@@ -119,6 +119,14 @@ def container_view(template: dict) -> dict:
 
 # ---------- plans ----------
 
+def restart(svc: str) -> Step:
+    """What `kubectl rollout restart` does, written as the patch it sends. rollout restart has no
+    --dry-run flag; a patch does, so the restart is validated by the API server like every other step."""
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": stamp}}}}}
+    return Step(["patch", "deployment", svc, "--type", "merge", "-p", json.dumps(body)])
+
+
 def plan_rollback_config(k: Kubectl, svc: str) -> Plan:
     name = f"{svc}-config"
     live = k.json("get", "configmap", name).get("data", {})
@@ -131,9 +139,9 @@ def plan_rollback_config(k: Kubectl, svc: str) -> Plan:
     restore = {key: live.get(key) for key in changes}
     return Plan("rollback_config", name, diff,
                 steps=[Step(["patch", "configmap", name, "--type", "merge", "-p", json.dumps({"data": changes})]),
-                       Step(["rollout", "restart", f"deployment/{svc}"])],
+                       restart(svc)],
                 undo=[Step(["patch", "configmap", name, "--type", "merge", "-p", json.dumps({"data": restore})]),
-                      Step(["rollout", "restart", f"deployment/{svc}"])])
+                      restart(svc)])
 
 
 def plan_rollback_deployment(k: Kubectl, svc: str) -> Plan:
@@ -171,7 +179,7 @@ def plan_scale_up(k: Kubectl, svc: str) -> Plan:
 def plan_restart(k: Kubectl, svc: str) -> Plan:
     k.json("get", "deployment", svc)  # exists and readable
     return Plan("restart_deployment", svc, [f"deployment {svc}: rolling restart, no spec change"],
-                steps=[Step(["rollout", "restart", f"deployment/{svc}"])], undo=[])
+                steps=[restart(svc)], undo=[])
 
 
 def plan_raise_memory(k: Kubectl, svc: str) -> Plan:

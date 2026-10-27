@@ -158,7 +158,7 @@ class RemediateTest(unittest.TestCase):
         self.assertEqual(len(k.writes()), 1)
 
     def test_apply_failure_runs_undo(self):
-        k = FakeKubectl({("deployment", "inventory"): deployment("inventory", replicas=1)}, fail_on=("rollout",))
+        k = FakeKubectl({("deployment", "inventory"): deployment("inventory", replicas=1)}, fail_on=("deployment",))
         rec = self.go(k, diag(action="restart_deployment"))
         self.assertEqual(rec["outcome"], "apply_failed_rolled_back")
 
@@ -210,6 +210,16 @@ class RemediateTest(unittest.TestCase):
         self.assertEqual([s.args for s in plan.steps], [["delete", "networkpolicy", "inventory-ingress"]])
         restored = json.loads(plan.undo[0].stdin)
         self.assertNotIn("uid", restored["metadata"])  # re-creatable object, not a stale copy
+
+    def test_restart_is_a_patch_that_supports_dry_run(self):
+        k = FakeKubectl({("deployment", "orders"): deployment("orders")})
+        rec = self.go(k, diag("orders", "bad_config", "restart_deployment"))
+        self.assertEqual(rec["outcome"], "mitigated")
+        dry, real = k.calls
+        self.assertEqual(dry[:3], ["patch", "deployment", "orders"])
+        self.assertIn("kubectl.kubernetes.io/restartedAt", dry[-2])
+        self.assertEqual(dry[-1], "--dry-run=server")
+        self.assertNotIn("rollout", sum(k.calls, []))  # `rollout restart` has no --dry-run flag
 
     def test_quantities(self):
         self.assertEqual(r.mebibytes("96Mi"), 96)
